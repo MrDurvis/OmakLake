@@ -5,20 +5,25 @@ using TMPro;
 public class ClueNode : MonoBehaviour
 {
     // Reference to the ClueData ScriptableObject
-    public ClueData clueData;
+    [SerializeField] private ClueData clueData;
 
-    // UI components
-    public TextMeshPro labelText;    // To display clue's name
-    public Image iconImage;          // To display clue's icon
-
-    // Positioning
+    // Positioning variables
     private Vector3 targetPosition;
     private Vector3 currentVelocity;
 
-    // Initialize with ClueData
+    void Start()
+    {
+        if (clueData != null)
+        {
+            Initialize(clueData);
+        }
+    }
+
+    // Initialize the node with ClueData
     public void Initialize(ClueData data)
     {
         clueData = data;
+        CreateUIElements();
         UpdateDisplay();
 
         // Optional: start at a random position
@@ -26,15 +31,27 @@ public class ClueNode : MonoBehaviour
         targetPosition = transform.localPosition;
     }
 
-    // Update UI display based on ClueData
-    private void UpdateDisplay()
+    // Create and set up UI elements directly
+    private void CreateUIElements()
     {
-        if (labelText != null)
-            labelText.text = clueData.clueName;
+        // Create and set up a TextMeshProUGUI for the clue name
+        GameObject labelObj = new GameObject("LabelText", typeof(RectTransform), typeof(TextMeshProUGUI));
+        labelObj.transform.SetParent(transform, false);
+        TextMeshProUGUI labelText = labelObj.GetComponent<TextMeshProUGUI>();
+        labelText.text = clueData.clueName;
+        labelText.alignment = TextAlignmentOptions.Center;
+        // Adjust additional TextMeshPro properties as needed
 
-        if (iconImage != null && clueData.icon != null)
-            iconImage.sprite = clueData.icon;
+        // Create and set up an Image for the clue icon
+        GameObject imageObj = new GameObject("IconImage", typeof(RectTransform), typeof(Image));
+        imageObj.transform.SetParent(transform, false);
+        Image iconImage = imageObj.GetComponent<Image>();
+        iconImage.sprite = clueData.icon;
+        // Adjust additional Image properties as needed
     }
+
+    // Currently, nothing additional needed to update
+    private void UpdateDisplay() { }
 
     void Update()
     {
