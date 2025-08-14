@@ -22,207 +22,196 @@ public class PauseMenuController : MonoBehaviour
     private bool isPaused = false;
     private bool isMenuActive = false;
 
-    private bool isInSubMenu = false; // Tracks if in a sub-menu like Cognition
+    private bool isInSubMenu = false;
 
-    // Variables for adaptive analog stick scrolling
-    private float stickHoldTime = 0f;
-    [SerializeField] private float initialDelay = 0.5f;             // Starting delay (seconds)
-    private float minDelay = 0.3f;                   // Minimal delay (fastest rate)
-    private float delayReductionPerSecond = 0.2f;  // Speed up over time
+    public GameObject cognitionBoardUI;
 
-    // Variables for D-pad edge detection and auto-repeat
-    private float lastDPadVertical = 0f; // 1 for up, -1 for down, 0 for none
+    private float lastDPadVertical = 0f;
     private float dpadHoldStartTime = 0f;
-    private float moveCooldown = 0.2f; // time between auto-moves while holding
+    private float moveCooldown = 0.2f;
 
     void Awake()
     {
-        // Get the input action map for UI controls
-        uiActionMap = inputActions.FindActionMap("UI", true);
-        navigateAction = uiActionMap.FindAction("Navigate");
-        submitAction = uiActionMap.FindAction("Submit");
-        cancelAction = uiActionMap.FindAction("Cancel");
+        uiActionMap = inputActions?.FindActionMap("UI", true);
+        navigateAction = uiActionMap?.FindAction("Navigate");
+        submitAction = uiActionMap?.FindAction("Submit");
+        cancelAction = uiActionMap?.FindAction("Cancel");
 
-        // Subscribe to input callbacks
-        navigateAction.performed += OnNavigate;
-        submitAction.performed += OnSubmit;
-        cancelAction.performed += OnCancel;
+        if (navigateAction != null)
+            navigateAction.performed += OnNavigate;
+        if (submitAction != null)
+            submitAction.performed += OnSubmit;
+        if (cancelAction != null)
+            cancelAction.performed += OnCancel;
     }
 
     void Start()
     {
-        pauseMenuUI.SetActive(false);
+        if (pauseMenuUI != null)
+            pauseMenuUI.SetActive(false);
+        else
+            Debug.LogWarning("pauseMenuUI is not assigned.");
+
         UpdateButtonColors();
 
-        // Start with UI controls disabled until paused
-        uiActionMap.Disable();
+        uiActionMap?.Disable();
 
-        // Initialize variables
-        stickHoldTime = 0f;
+        isPaused = false;
+        isMenuActive = false;
+
+        if (menuButtons == null || menuButtons.Length == 0)
+            Debug.LogWarning("menuButtons array is not assigned or empty.");
+
         lastDPadVertical = 0f;
         dpadHoldStartTime = 0f;
     }
 
     void Update()
     {
-        // Toggle pause (Escape or Start button)
-        if (Keyboard.current.escapeKey.wasPressedThisFrame || Gamepad.current.startButton.wasPressedThisFrame)
+        if (Keyboard.current.escapeKey.wasPressedThisFrame || Gamepad.current?.startButton.wasPressedThisFrame == true)
         {
             if (isPaused) ResumeGame();
             else PauseGame();
         }
 
-        // --- Handle digital D-Pad navigation with edge detection and auto-repeat ---
-        Vector2 dpadInput = navigateAction.ReadValue<Vector2>();
-        float currentTime = Time.unscaledTime;
+        if (!isPaused || !isMenuActive)
+            return;
 
+        HandleDPadNavigation();
+    }
+
+    private void HandleDPadNavigation()
+    {
+        Vector2 dpadInput = navigateAction?.ReadValue<Vector2>() ?? Vector2.zero;
         float deadZone = 0.5f;
-        bool shouldMove = false;
         float currentDPadY = dpadInput.y;
+        float currentTime = Time.unscaledTime;
+        bool shouldMove = false;
 
-        if (Mathf.Abs(currentDPadY) > deadZone)
+        if (Mathf.Abs(currentDPadY) > deadZone && menuButtons != null && menuButtons.Length > 0)
         {
             float direction = Mathf.Sign(currentDPadY);
-            if (direction != lastDPadVertical)
+            if (direction != lastDPadVertical && lastDPadVertical != 0f)
             {
                 // Edge detected: move once
                 shouldMove = true;
                 lastDPadVertical = direction;
                 dpadHoldStartTime = currentTime;
             }
-            else
+            else if (direction == lastDPadVertical && currentTime - dpadHoldStartTime > moveCooldown)
             {
-                // Same direction held
-                if (currentTime - dpadHoldStartTime > moveCooldown)
-                {
-                    // Time to auto-repeat move
-                    shouldMove = true;
-                    dpadHoldStartTime = currentTime;
-                }
+                // Auto-repeat
+                shouldMove = true;
+                dpadHoldStartTime = currentTime;
+            }
+            else if (lastDPadVertical == 0f)
+            {
+                // First press
+                shouldMove = true;
+                lastDPadVertical = direction;
+                dpadHoldStartTime = currentTime;
             }
         }
         else
         {
-            // No input
             lastDPadVertical = 0f;
             dpadHoldStartTime = 0f;
         }
 
-        if (shouldMove)
+        if (shouldMove && menuButtons != null && menuButtons.Length > 0)
         {
             if (currentDPadY > deadZone)
             {
-                // Up
+                // Move selection up
                 currentSelectionIndex = (currentSelectionIndex - 1 + menuButtons.Length) % menuButtons.Length;
                 UpdateButtonColors();
             }
             else if (currentDPadY < -deadZone)
             {
-                // Down
+                // Move selection down
                 currentSelectionIndex = (currentSelectionIndex + 1) % menuButtons.Length;
                 UpdateButtonColors();
             }
         }
-
-        // --- Optional: Handle analog stick navigation with adaptive delay ---
-        // (Your existing analog stick code can be handled separately if desired)
-        // For now, we focus on D-Pad handling as per your reported issue.
     }
 
     private void OnNavigate(InputAction.CallbackContext context)
     {
-        // Can be used for other input methods if needed
-        // No changes required here for D-pad auto-repeat logic
+        // Additional input methods can be handled here
     }
-
     private void OnSubmit(InputAction.CallbackContext context)
     {
-        // Check if current button is the cognitionButton
-        if (menuButtons[currentSelectionIndex] == cognitionButton)
+        // Only proceed if game is paused and menu is active
+        if (!isPaused || !isMenuActive)
+            return;
+
+        if (menuButtons != null && menuButtons.Length > 0)
         {
-            OpenCognition();
-        }
-        else
-        {
-            // Optionally invoke the button onClick for other buttons
-            menuButtons[currentSelectionIndex].onClick.Invoke();
-        }
-    }
-    private void OnCancel(InputAction.CallbackContext context)
-    {
-        if (isPaused && isMenuActive)
-        {
-            if (isInSubMenu)
+            Button currentButton = menuButtons[currentSelectionIndex];
+
+            if (currentButton != null)
             {
-                // Return to main pause menu, close sub-menu like Cognition
-                CloseCognition();
+                if (currentButton == cognitionButton)
+                {
+                    OpenCognition();
+                }
+                else
+                {
+                    // Invoke the button's onClick event
+                    currentButton.onClick.Invoke();
+                }
             }
             else
             {
-                // If in main menu, unpause the game
-                ResumeGame();
-            }
-        }
-    }
-
-    void UpdateButtonColors()
-    {
-        for (int i = 0; i < menuButtons.Length; i++)
-        {
-            TMP_Text btnText = menuButtons[i].GetComponentInChildren<TMP_Text>();
-            if (btnText != null)
-            {
-                btnText.color = (i == currentSelectionIndex) ? selectedColor : defaultColor;
+                Debug.LogWarning($"Button at index {currentSelectionIndex} is null.");
             }
         }
     }
 
     public void PauseGame()
     {
+        if (pauseMenuUI != null)
+            pauseMenuUI.SetActive(true);
         Time.timeScale = 0;
-        pauseMenuUI.SetActive(true);
         isPaused = true;
         isMenuActive = true;
         currentSelectionIndex = 0;
         UpdateButtonColors();
 
-        // Enable UI input controls
-        uiActionMap.Enable();
+        uiActionMap?.Enable();
 
-        // Reset adaptive variables
-        stickHoldTime = 0f;
+        // Reset variables
         lastDPadVertical = 0f;
         dpadHoldStartTime = 0f;
     }
 
     public void ResumeGame()
     {
+        if (pauseMenuUI != null)
+            pauseMenuUI.SetActive(false);
         Time.timeScale = 1;
-        pauseMenuUI.SetActive(false);
         isPaused = false;
         isMenuActive = false;
 
-        // Disable UI input controls
-        uiActionMap.Disable();
+        uiActionMap?.Disable();
 
-        // Reset adaptive variables
-        stickHoldTime = 0f;
+        // Reset variables
         lastDPadVertical = 0f;
         dpadHoldStartTime = 0f;
     }
 
-    public GameObject cognitionBoardUI; // Assign via inspector
-
     public void OpenCognition()
     {
-        cognitionBoardUI.SetActive(true);
-        isInSubMenu = true; // Now we're in a sub-menu
+        if (cognitionBoardUI != null)
+            cognitionBoardUI.SetActive(true);
+        isInSubMenu = true;
     }
 
     public void CloseCognition()
     {
-        cognitionBoardUI.SetActive(false);
-        isInSubMenu = false; // Back to main menu
+        if (cognitionBoardUI != null)
+            cognitionBoardUI.SetActive(false);
+        isInSubMenu = false;
     }
 
     public void QuitGame()
@@ -230,7 +219,52 @@ public class PauseMenuController : MonoBehaviour
 #if UNITY_EDITOR
         UnityEditor.EditorApplication.isPlaying = false;
 #else
-            Application.Quit();
+    Application.Quit();
 #endif
     }
+
+    /// <summary>
+    /// Updates the button label colors based on current selection.
+    /// Checks for null references to avoid exceptions.
+    /// </summary>
+    private void UpdateButtonColors()
+    {
+        if (menuButtons == null || menuButtons.Length == 0)
+            return;
+
+        for (int i = 0; i < menuButtons.Length; i++)
+        {
+            if (menuButtons[i] != null)
+            {
+                TMP_Text btnText = menuButtons[i].GetComponentInChildren<TMP_Text>();
+                if (btnText != null)
+                {
+                    btnText.color = (i == currentSelectionIndex) ? selectedColor : defaultColor;
+                }
+                else
+                {
+                    Debug.LogWarning($"TMP_Text component not found in children of button at index {i}.");
+                }
+            }
+            else
+            {
+                Debug.LogWarning($"Button at index {i} is null.");
+            }
+        }
+    }
+    private void OnCancel(InputAction.CallbackContext context)
+{
+    // Check if the game is paused and menu is active
+    if (isPaused && isMenuActive)
+    {
+        if (isInSubMenu)
+        {
+            CloseCognition();
+        }
+        else
+        {
+            ResumeGame();
+        }
+    }
+}
 }

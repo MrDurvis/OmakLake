@@ -10,9 +10,9 @@ MonoBehaviour:
   m_Enabled: 1
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: 6234d3eed4f6dea4c94d7bd266b80334, type: 3}
-  m_Name: ClueData
+  m_Name: ClueCubeClue
   m_EditorClassIdentifier: 
-  clueID: 0
+  clueID: 1
   clueName: 
   description: 
   icon: {fileID: 0}

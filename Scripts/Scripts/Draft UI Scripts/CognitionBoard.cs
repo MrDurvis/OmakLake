@@ -3,10 +3,10 @@ using System.Collections.Generic;
 
 public class CognitionBoard : MonoBehaviour
 {
-    public GameObject nodePrefab;
-    public Transform nodesParent;
-    public List<ClueNode> nodes = new List<ClueNode>();
-    public List<ConnectionLine> connections = new List<ConnectionLine>();
+    public GameObject nodePrefab; // your ClueNode prefab
+    public Transform nodesParent; // parent transform for nodes
+    public List<ClueNode> nodes = new List<ClueNode>(); // track nodes
+    public List<ConnectionLine> connections = new List<ConnectionLine>(); // connection lines
 
     void Update()
     {
@@ -21,12 +21,12 @@ public class CognitionBoard : MonoBehaviour
                 {
                     Vector3 direction = node.transform.localPosition - other.transform.localPosition;
                     float distance = direction.magnitude + 0.1f; // avoid division by zero
-                    float repulsionForce = 10f / (distance * distance); // repel each other
+                    float repulsionForce = 10f / (distance * distance); // repel
                     force += direction.normalized * repulsionForce;
                 }
             }
 
-            // Attractive force along connections
+            // Attractive Force along connections
             foreach (var conn in connections)
             {
                 if (conn.IsConnectedTo(node))
@@ -34,47 +34,43 @@ public class CognitionBoard : MonoBehaviour
                     var otherNode = conn.GetOtherNode(node);
                     Vector3 direction = otherNode.transform.localPosition - node.transform.localPosition;
                     float distance = direction.magnitude;
-                    float springForce = (distance - 100f) * 0.5f * conn.strength; // spring-like force
+                    float springForce = (distance - 100f) * 0.5f * conn.strength; // spring formula
                     force += direction.normalized * springForce;
                 }
             }
 
-            // Limit maximum force
+            // Limit force magnitude
             float maxForce = 10f;
             force = Vector3.ClampMagnitude(force, maxForce);
 
-            // Update position based on force
+            // Apply force as target position
             node.SetTargetPosition(node.transform.localPosition + force * Time.deltaTime);
         }
     }
 
-    // Add nodes
-    public void AddNode(string name, int id)
+    // Add a new node with ClueData
+    public void AddNode(ClueData clueData)
     {
         GameObject nodeObj = Instantiate(nodePrefab, nodesParent);
         ClueNode node = nodeObj.GetComponent<ClueNode>();
-        node.nodeName = name;
-        node.nodeID = id;
+        node.Initialize(clueData); // pass ClueData object
         nodes.Add(node);
     }
 
-    // Connect nodes
+    // Connect two nodes, use their nodeID or reference
     public void ConnectNodes(ClueNode a, ClueNode b, float strength)
     {
-        // Instantiate a line object
-        ConnectionLine line = InstantiateLine(a.transform.position, b.transform.position);
+        ConnectionLine line = InstantiateLine(a.transform.localPosition, b.transform.localPosition);
         line.Initialize(a, b, strength);
         connections.Add(line);
-        // Update node positions after connection
         UpdateNodePositions();
     }
 
     private ConnectionLine InstantiateLine(Vector3 start, Vector3 end)
     {
         GameObject lineObj = new GameObject("ConnectionLine");
-        lineObj.transform.parent = this.transform; // parent to the CognitionBoard
+        lineObj.transform.parent = this.transform; // parent to the board
         LineRenderer lr = lineObj.AddComponent<LineRenderer>();
-        // Assign a material as needed
         lr.material = new Material(Shader.Find("Sprites/Default"));
         lr.positionCount = 2;
         ConnectionLine line = lineObj.AddComponent<ConnectionLine>();
@@ -109,7 +105,7 @@ public class CognitionBoard : MonoBehaviour
         if (totalWeight > 0)
             position /= totalWeight;
         else
-            position = node.transform.localPosition; // no connection, stay put
+            position = node.transform.localPosition;
 
         return position;
     }

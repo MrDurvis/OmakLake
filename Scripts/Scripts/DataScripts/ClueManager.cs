@@ -28,9 +28,10 @@ public class ClueManager : MonoBehaviour
     /// </summary>
     public void AddClueNode(ClueData clueData)
     {
+        // Check if clue is already added
         if (cluesByID.ContainsKey(clueData.clueID))
         {
-            // Clue already discovered, do nothing or update as needed
+            Debug.LogWarning($"Clue with ID {clueData.clueID} already exists. Skipping addition.");
             return;
         }
 
@@ -40,7 +41,7 @@ public class ClueManager : MonoBehaviour
         // Add node to the Cognition Board
         if (cognitionBoard != null)
         {
-            cognitionBoard.AddNode(clueData.clueName, clueData.clueID);
+            cognitionBoard.AddNode(clueData);
             Debug.Log("Added clue node: " + clueData.clueName);
         }
         else
