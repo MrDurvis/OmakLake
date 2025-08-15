@@ -12,9 +12,21 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 1fe8da9fd39a7a14c96cdf9a336c2aaa, type: 3}
   m_Name: ClueCubeItem
   m_EditorClassIdentifier: 
-  itemID: 1
+  guid: 734e08f8-8d3a-4761-bdc0-b3be08398108
+  itemID: 0
   itemName: ClueCube
-  description: A mysterious Cube rests on top of the counter.
+  description: 
   icon: {fileID: 21300000, guid: 2ee12657dbde6274c8ed08df63d4e567, type: 3}
   canBeClue: 1
   clueData: {fileID: 11400000, guid: 70716ec084e96f244a2f20e3d4a85b55, type: 2}
+  dialogue:
+  - type: 0
+    text: 
+    prompt: 
+    options: []
+    defaultIndex: 0
+    yesIndex: 0
+    semantic: 0
+  graph: {fileID: 11400000, guid: 776bc7ab735927149be1258404c64e75, type: 2}
+  afterYesText: 
+  afterNoText: 

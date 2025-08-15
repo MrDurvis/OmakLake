@@ -9,7 +9,7 @@ Material:
   m_PrefabAsset: {fileID: 0}
   m_Name: Horizon-regular SDF Material
   m_Shader: {fileID: 4800000, guid: 68e6db2ebdc24f95958faec2be5558d6, type: 3}
-  m_Parent: {fileID: 2100000, guid: 6ae573d8b50cb8247a6c299d40dea9ed, type: 2}
+  m_Parent: {fileID: 2100000, guid: b220e266a861a7a42a144f03131682d8, type: 2}
   m_ModifiedSerializedProperties: 0
   m_ValidKeywords: []
   m_InvalidKeywords: []
@@ -25,8 +25,7 @@ Material:
     m_TexEnvs: []
     m_Ints: []
     m_Floats: []
-    m_Colors:
-    - _FaceColor: {r: 0.86, g: 0.79693335, b: 0.688, a: 1}
+    m_Colors: []
   m_BuildTextureStacks: []
   m_AllowLocking: 1
 --- !u!28 &-4377147520855659695
@@ -85,7 +84,7 @@ MonoBehaviour:
   m_Enabled: 1
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: 71c1514a6bd24e1e882cebbe1904ce04, type: 3}
-  m_Name: Horizon-regular SDF
+  m_Name: Horizon-regular SDF 1
   m_EditorClassIdentifier: 
   m_Version: 1.1.0
   m_FaceInfo:

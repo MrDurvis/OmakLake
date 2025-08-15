@@ -27,7 +27,7 @@ public class ClueManager : MonoBehaviour
         Instance = this;
         DontDestroyOnLoad(gameObject);
 
-        Debug.Log("[ClueManager] Awake. Ready to track clues.");
+       // Debug.Log("[ClueManager] Awake. Ready to track clues.");
     }
 
     /// <summary>
@@ -42,40 +42,40 @@ public class ClueManager : MonoBehaviour
     {
         if (data == null)
         {
-            Debug.LogError("[ClueManager] DiscoverClue called with NULL data.");
+            //Debug.LogError("[ClueManager] DiscoverClue called with NULL data.");
             return;
         }
 
         if (HasClue(data.Guid))
         {
-            Debug.Log($"[ClueManager] Clue '{data.clueName}' already discovered.");
+            //Debug.Log($"[ClueManager] Clue '{data.clueName}' already discovered.");
             return;
         }
 
         // Store runtime
         discovered.Add(data.Guid, data);
-        Debug.Log($"[ClueManager] Discovered clue '{data.clueName}' (GUID: {data.Guid})");
+        //Debug.Log($"[ClueManager] Discovered clue '{data.clueName}' (GUID: {data.Guid})");
 
         // Persist to save
         if (SaveSystem.Instance != null)
         {
             SaveSystem.Instance.MarkClueDiscovered(data.Guid);
-            Debug.Log($"[ClueManager] Saved '{data.clueName}' to SaveSystem.");
+            //Debug.Log($"[ClueManager] Saved '{data.clueName}' to SaveSystem.");
         }
         else
         {
-            Debug.LogWarning("[ClueManager] SaveSystem.Instance is NULL. Clue discovery not persisted.");
+            //Debug.LogWarning("[ClueManager] SaveSystem.Instance is NULL. Clue discovery not persisted.");
         }
 
         // Add node to cognition board
         if (cognitionBoard != null)
         {
             cognitionBoard.AddNode(data);
-            Debug.Log($"[ClueManager] Added '{data.clueName}' to Cognition Board.");
+            //Debug.Log($"[ClueManager] Added '{data.clueName}' to Cognition Board.");
         }
         else
         {
-            Debug.LogWarning("[ClueManager] CognitionBoard not assigned. Node will appear after restore.");
+            //Debug.LogWarning("[ClueManager] CognitionBoard not assigned. Node will appear after restore.");
         }
 
         // Notify listeners
@@ -91,7 +91,7 @@ public class ClueManager : MonoBehaviour
     {
         if (resolver == null)
         {
-            Debug.LogError("[ClueManager] RestoreFromSave called without a resolver function.");
+            //Debug.LogError("[ClueManager] RestoreFromSave called without a resolver function.");
             return;
         }
 
@@ -116,7 +116,7 @@ public class ClueManager : MonoBehaviour
         }
 
         cognitionBoard?.RestoreLayoutFromSave();
-        Debug.Log("[ClueManager] RestoreFromSave completed.");
+        //Debug.Log("[ClueManager] RestoreFromSave completed.");
     }
 
     /// <summary>

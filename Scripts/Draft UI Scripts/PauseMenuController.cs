@@ -1,17 +1,28 @@
 using UnityEngine;
 using UnityEngine.UI;
 using TMPro;
+using UnityEngine.EventSystems;
 using UnityEngine.InputSystem;
 
 public class PauseMenuController : MonoBehaviour
 {
-    public GameObject pauseMenuUI;
-    public Button[] menuButtons;
-    public Color selectedColor = Color.yellow;
-    public Color defaultColor = Color.white;
-    public InputActionAsset inputActions;
+    [Header("UI")]
+    [SerializeField] private GameObject pauseMenuUI;       // main pause list panel
+    [SerializeField] private Button[] menuButtons;
+    [SerializeField] private Button cognitionButton;
 
-    public Button cognitionButton;
+    // Panel that visually contains the board (canvas/panel)
+    [SerializeField] private GameObject cognitionBoardUI;
+
+    // The actual board behaviour (may be on a child that auto-disables in Awake)
+    [SerializeField] private CognitionBoard cognitionBoard;
+
+    [Header("Selection Colors")]
+    [SerializeField] private Color selectedColor = Color.yellow;
+    [SerializeField] private Color defaultColor = Color.white;
+
+    [Header("Input (UI action map)")]
+    [SerializeField] private InputActionAsset inputActions;
 
     private InputActionMap uiActionMap;
     private InputAction navigateAction;
@@ -21,63 +32,55 @@ public class PauseMenuController : MonoBehaviour
     private int currentSelectionIndex = 0;
     private bool isPaused = false;
     private bool isMenuActive = false;
-
     private bool isInSubMenu = false;
-
-    public GameObject cognitionBoardUI;
 
     private float lastDPadVertical = 0f;
     private float dpadHoldStartTime = 0f;
-    private float moveCooldown = 0.2f;
+    [SerializeField] private float moveCooldown = 0.2f;
 
     void Awake()
     {
-        uiActionMap = inputActions?.FindActionMap("UI", true);
+        uiActionMap    = inputActions?.FindActionMap("UI", true);
         navigateAction = uiActionMap?.FindAction("Navigate");
-        submitAction = uiActionMap?.FindAction("Submit");
-        cancelAction = uiActionMap?.FindAction("Cancel");
-
-        if (navigateAction != null)
-            navigateAction.performed += OnNavigate;
-        if (submitAction != null)
-            submitAction.performed += OnSubmit;
-        if (cancelAction != null)
-            cancelAction.performed += OnCancel;
-    }
-
-    void Start()
-    {
-        if (pauseMenuUI != null)
-            pauseMenuUI.SetActive(false);
-        else
-            Debug.LogWarning("pauseMenuUI is not assigned.");
-
-        UpdateButtonColors();
+        submitAction   = uiActionMap?.FindAction("Submit");
+        cancelAction   = uiActionMap?.FindAction("Cancel");
 
         uiActionMap?.Disable();
 
-        isPaused = false;
-        isMenuActive = false;
+        if (pauseMenuUI) pauseMenuUI.SetActive(false);
+        if (cognitionBoardUI) cognitionBoardUI.SetActive(false);
+        // NOTE: cognitionBoard itself may be inactive because its Awake() sets it false—that’s OK.
+        UpdateButtonColors();
+    }
 
-        if (menuButtons == null || menuButtons.Length == 0)
-            Debug.LogWarning("menuButtons array is not assigned or empty.");
+    void OnEnable()
+    {
+        if (navigateAction != null) navigateAction.performed += OnNavigate;
+        if (submitAction   != null) submitAction.performed   += OnSubmit;
+        if (cancelAction   != null) cancelAction.performed   += OnCancel;
+    }
 
-        lastDPadVertical = 0f;
-        dpadHoldStartTime = 0f;
+    void OnDisable()
+    {
+        if (navigateAction != null) navigateAction.performed -= OnNavigate;
+        if (submitAction   != null) submitAction.performed   -= OnSubmit;
+        if (cancelAction   != null) cancelAction.performed   -= OnCancel;
+
+        uiActionMap?.Disable();
     }
 
     void Update()
     {
-        if (Keyboard.current.escapeKey.wasPressedThisFrame || Gamepad.current?.startButton.wasPressedThisFrame == true)
+        // Toggle pause (Esc or Start)
+        if (Keyboard.current?.escapeKey.wasPressedThisFrame == true ||
+            Gamepad.current?.startButton.wasPressedThisFrame == true)
         {
             if (isPaused) ResumeGame();
             else PauseGame();
         }
 
-        if (!isPaused || !isMenuActive)
-            return;
-
-        HandleDPadNavigation();
+        if (isPaused && isMenuActive && !isInSubMenu)
+            HandleDPadNavigation();
     }
 
     private void HandleDPadNavigation()
@@ -93,20 +96,17 @@ public class PauseMenuController : MonoBehaviour
             float direction = Mathf.Sign(currentDPadY);
             if (direction != lastDPadVertical && lastDPadVertical != 0f)
             {
-                // Edge detected: move once
                 shouldMove = true;
                 lastDPadVertical = direction;
                 dpadHoldStartTime = currentTime;
             }
             else if (direction == lastDPadVertical && currentTime - dpadHoldStartTime > moveCooldown)
             {
-                // Auto-repeat
                 shouldMove = true;
                 dpadHoldStartTime = currentTime;
             }
             else if (lastDPadVertical == 0f)
             {
-                // First press
                 shouldMove = true;
                 lastDPadVertical = direction;
                 dpadHoldStartTime = currentTime;
@@ -121,97 +121,111 @@ public class PauseMenuController : MonoBehaviour
         if (shouldMove && menuButtons != null && menuButtons.Length > 0)
         {
             if (currentDPadY > deadZone)
-            {
-                // Move selection up
                 currentSelectionIndex = (currentSelectionIndex - 1 + menuButtons.Length) % menuButtons.Length;
-                UpdateButtonColors();
-            }
             else if (currentDPadY < -deadZone)
-            {
-                // Move selection down
                 currentSelectionIndex = (currentSelectionIndex + 1) % menuButtons.Length;
-                UpdateButtonColors();
-            }
+
+            UpdateButtonColors();
         }
     }
 
-    private void OnNavigate(InputAction.CallbackContext context)
-    {
-        // Additional input methods can be handled here
-    }
+    private void OnNavigate(InputAction.CallbackContext context) { /* optional */ }
+
     private void OnSubmit(InputAction.CallbackContext context)
     {
-        // Only proceed if game is paused and menu is active
-        if (!isPaused || !isMenuActive)
-            return;
+        if (!isPaused || !isMenuActive) return;
+        if (isInSubMenu) return; // submit is handled by the sub menu (if any)
 
         if (menuButtons != null && menuButtons.Length > 0)
         {
             Button currentButton = menuButtons[currentSelectionIndex];
+            if (!currentButton)
+            {
+                Debug.LogWarning($"[PauseMenu] Button at index {currentSelectionIndex} is null.");
+                return;
+            }
 
-            if (currentButton != null)
-            {
-                if (currentButton == cognitionButton)
-                {
-                    OpenCognition();
-                }
-                else
-                {
-                    // Invoke the button's onClick event
-                    currentButton.onClick.Invoke();
-                }
-            }
-            else
-            {
-                Debug.LogWarning($"Button at index {currentSelectionIndex} is null.");
-            }
+            if (currentButton == cognitionButton) OpenCognition();
+            else currentButton.onClick.Invoke();
         }
     }
 
     public void PauseGame()
     {
-        if (pauseMenuUI != null)
-            pauseMenuUI.SetActive(true);
-        Time.timeScale = 0;
+        CloseDialogueIfOpen();
+
+        if (pauseMenuUI) pauseMenuUI.SetActive(true);
+        if (cognitionBoardUI) cognitionBoardUI.SetActive(false);
+
+        Time.timeScale = 0f;
         isPaused = true;
         isMenuActive = true;
+        isInSubMenu = false;
+
         currentSelectionIndex = 0;
         UpdateButtonColors();
 
         uiActionMap?.Enable();
-
-        // Reset variables
-        lastDPadVertical = 0f;
-        dpadHoldStartTime = 0f;
+        ResetNavState();
     }
 
     public void ResumeGame()
     {
-        if (pauseMenuUI != null)
-            pauseMenuUI.SetActive(false);
-        Time.timeScale = 1;
+        // If board sub-menu is open, close it first to avoid leaving it enabled
+        if (isInSubMenu) CloseCognition();
+
+        if (pauseMenuUI) pauseMenuUI.SetActive(false);
+        Time.timeScale = 1f;
         isPaused = false;
         isMenuActive = false;
 
         uiActionMap?.Disable();
+        ResetNavState();
+    }
 
-        // Reset variables
+    private void ResetNavState()
+    {
         lastDPadVertical = 0f;
         dpadHoldStartTime = 0f;
     }
 
     public void OpenCognition()
     {
-        if (cognitionBoardUI != null)
-            cognitionBoardUI.SetActive(true);
+        if (!isPaused) PauseGame(); // safety
+
+        // Hide the button list while board is up (optional; keeps UI clean)
+        if (pauseMenuUI) pauseMenuUI.SetActive(false);
+
+        // Enable the container panel
+        if (cognitionBoardUI) cognitionBoardUI.SetActive(true);
+
+        // IMPORTANT: explicitly enable the board object too (it disables itself in Awake)
+        if (cognitionBoard && !cognitionBoard.gameObject.activeSelf)
+        {
+            cognitionBoard.gameObject.SetActive(true);
+            // Optional: refresh layout from save when opening
+            cognitionBoard.RestoreLayoutFromSave();
+        }
+
+        // Clear UI selection so Submit doesn't trigger menu buttons behind the board
+        if (EventSystem.current) EventSystem.current.SetSelectedGameObject(null);
+
         isInSubMenu = true;
+        Debug.Log("[PauseMenu] Cognition Board opened.");
     }
 
     public void CloseCognition()
     {
-        if (cognitionBoardUI != null)
-            cognitionBoardUI.SetActive(false);
+        if (cognitionBoardUI) cognitionBoardUI.SetActive(false);
+        if (cognitionBoard) cognitionBoard.gameObject.SetActive(false);
+
+        // Return to the pause menu list
+        if (pauseMenuUI) pauseMenuUI.SetActive(true);
+
         isInSubMenu = false;
+        currentSelectionIndex = 0;
+        UpdateButtonColors();
+        Debug.Log("[PauseMenu] Cognition Board closed.");
     }
 
     public void QuitGame()
@@ -219,52 +233,40 @@ public class PauseMenuController : MonoBehaviour
 #if UNITY_EDITOR
         UnityEditor.EditorApplication.isPlaying = false;
 #else
-    Application.Quit();
+        Application.Quit();
 #endif
     }
 
-    /// <summary>
-    /// Updates the button label colors based on current selection.
-    /// Checks for null references to avoid exceptions.
-    /// </summary>
     private void UpdateButtonColors()
     {
-        if (menuButtons == null || menuButtons.Length == 0)
-            return;
+        if (menuButtons == null || menuButtons.Length == 0) return;
 
         for (int i = 0; i < menuButtons.Length; i++)
         {
-            if (menuButtons[i] != null)
+            var btn = menuButtons[i];
+            if (!btn)
             {
-                TMP_Text btnText = menuButtons[i].GetComponentInChildren<TMP_Text>();
-                if (btnText != null)
-                {
-                    btnText.color = (i == currentSelectionIndex) ? selectedColor : defaultColor;
-                }
-                else
-                {
-                    Debug.LogWarning($"TMP_Text component not found in children of button at index {i}.");
-                }
+                Debug.LogWarning($"[PauseMenu] Button at index {i} is null.");
+                continue;
             }
-            else
-            {
-                Debug.LogWarning($"Button at index {i} is null.");
-            }
+
+            TMP_Text txt = btn.GetComponentInChildren<TMP_Text>();
+            if (txt) txt.color = (i == currentSelectionIndex) ? selectedColor : defaultColor;
         }
     }
+
     private void OnCancel(InputAction.CallbackContext context)
-{
-    // Check if the game is paused and menu is active
-    if (isPaused && isMenuActive)
     {
-        if (isInSubMenu)
-        {
-            CloseCognition();
-        }
-        else
-        {
-            ResumeGame();
-        }
+        if (!isPaused || !isMenuActive) return;
+
+        if (isInSubMenu) CloseCognition();
+        else ResumeGame();
     }
-}
+
+    // ---- Helper to avoid static calls ----
+    private static void CloseDialogueIfOpen()
+    {
+        var dm = DialogueManager.Instance;
+        if (dm != null && dm.IsActive()) dm.Hide();
+    }
 }

@@ -49,7 +49,7 @@ public class ThirdPersonController : MonoBehaviour
 
     private bool IsDescending = false;
 
-    public bool isLocked = false; 
+    public bool isLocked = false;
 
     Animator animator;
     CharacterController cc;
@@ -69,7 +69,7 @@ public class ThirdPersonController : MonoBehaviour
     // Update is only being used here to identify keys and trigger animations
     void Update()
     {
-        
+
         if (isLocked)
         {
             return;
@@ -192,6 +192,13 @@ public class ThirdPersonController : MonoBehaviour
     private void FixedUpdate()
     {
 
+         if (isLocked)
+    {
+        // Ensure no motion is applied this frame (CharacterController only moves when Move is called).
+        // We do NOT call cc.Move here.
+        return;
+    }
+
         // Sprinting velocity boost or crounching desacelerate
         float velocityAdittion = 0;
         if (isRunning)
@@ -305,8 +312,46 @@ public class ThirdPersonController : MonoBehaviour
         }
     }
 
-   public void Teleport(Vector3 position)
+    public void Teleport(Vector3 position)
+    {
+        transform.position = position;
+    }
+
+    private void OnEnable()
+    {
+        DialogueManager.OnDialogActiveChanged += HandleDialogToggle;
+    }
+
+    private void OnDisable()
+    {
+        DialogueManager.OnDialogActiveChanged -= HandleDialogToggle;
+    }
+
+private void HandleDialogToggle(bool active)
 {
-    transform.position = position;
-} 
+    isLocked = active;
+
+    // Stop Animator root motion from moving the character while locked.
+    if (animator) animator.applyRootMotion = !active;
+
+    if (active)
+    {
+        // Nuke any residual input/anim state so the pose settles.
+        inputHorizontal = 0f;
+        inputVertical = 0f;
+        isRunning = false;
+        isCrouching = false;
+
+        if (animator)
+        {
+            animator.SetBool("IsWalking", false);
+            animator.SetBool("IsRunning", false);
+            animator.SetBool("IsAscending", false);
+            animator.SetBool("IsDescending", false);
+        }
+    }
+
+    Debug.Log($"[ThirdPersonController] Dialog lock={(active ? "ON" : "OFF")} | applyRootMotion={(animator ? animator.applyRootMotion : false)}");
+}
+
 }

@@ -12,9 +12,10 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 6234d3eed4f6dea4c94d7bd266b80334, type: 3}
   m_Name: ClueCubeClue
   m_EditorClassIdentifier: 
-  clueID: 1
-  clueName: 
-  description: 
-  icon: {fileID: 0}
-  category: 0
-  relatedCluesIDs: 
+  guid: 44da09b9-de94-4ac6-a16e-fb235b0a5a9d
+  clueName: ClueCube
+  description: A ClueCube, found on the Desk in Omak Motors.
+  icon: {fileID: 21300000, guid: 2ee12657dbde6274c8ed08df63d4e567, type: 3}
+  category: 1
+  relatedClueGuids:
+  - 

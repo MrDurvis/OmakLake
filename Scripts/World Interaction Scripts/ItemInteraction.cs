@@ -12,7 +12,9 @@ public class ItemInteraction : MonoBehaviour
     [SerializeField] private InputActionReference interactAction;
 
     private bool playerInRange;
-    private bool pressInProgress; // prevents double-fire while the same button press is held
+    private bool pressInProgress; // locks while the same press is held
+    private float suppressUntil;  // short cooldown window after dialog closes
+    private bool waitForReleaseAfterDialog; // require Interact to be fully released
 
     private void Reset()
     {
@@ -30,29 +32,36 @@ public class ItemInteraction : MonoBehaviour
         if (interactAction?.action == null)
         {
             Debug.LogError($"[ItemInteraction:{name}] No InputActionReference assigned.");
-            return;
         }
-
-        interactAction.action.started   += OnInteractStarted;   // fire here for Press/Tap/Hold
-        interactAction.action.performed += OnInteractPerformed; // still listen—will be a no-op if already handled
-        interactAction.action.canceled  += OnInteractCanceled;
-        interactAction.action.Enable();
-
-        // Dump bindings for clarity
-        for (int i = 0; i < interactAction.action.bindings.Count; i++)
+        else
         {
-            var b = interactAction.action.bindings[i];
-            Debug.Log($"[ItemInteraction:{name}] Binding[{i}] path='{b.path}' groups='{b.groups}' interactions='{b.interactions}'");
+            interactAction.action.started   += OnInteractStarted;
+            interactAction.action.performed += OnInteractPerformed;
+            interactAction.action.canceled  += OnInteractCanceled;
+            interactAction.action.Enable();
+
+            for (int i = 0; i < interactAction.action.bindings.Count; i++)
+            {
+                var b = interactAction.action.bindings[i];
+                Debug.Log($"[ItemInteraction:{name}] Binding[{i}] path='{b.path}' groups='{b.groups}' interactions='{b.interactions}'");
+            }
         }
+
+        // Listen for dialog open/close to add a small cooldown + release requirement
+        DialogueManager.OnDialogActiveChanged += OnDialogActiveChanged;
     }
 
     private void OnDisable()
     {
-        if (interactAction?.action == null) return;
-        interactAction.action.started   -= OnInteractStarted;
-        interactAction.action.performed -= OnInteractPerformed;
-        interactAction.action.canceled  -= OnInteractCanceled;
-        interactAction.action.Disable();
+        if (interactAction?.action != null)
+        {
+            interactAction.action.started   -= OnInteractStarted;
+            interactAction.action.performed -= OnInteractPerformed;
+            interactAction.action.canceled  -= OnInteractCanceled;
+            interactAction.action.Disable();
+        }
+
+        DialogueManager.OnDialogActiveChanged -= OnDialogActiveChanged;
         Debug.Log($"[ItemInteraction:{name}] Disabled interact action.");
     }
 
@@ -80,18 +89,22 @@ public class ItemInteraction : MonoBehaviour
 
     private void Update()
     {
-        // Occasional phase/value spam for visibility
-        if (interactAction?.action != null && Time.frameCount % 30 == 0)
+        // After dialog closes, wait until Interact is fully released, then unlock
+        if (waitForReleaseAfterDialog && interactAction?.action != null)
         {
-            float v = 0f;
-            try { v = interactAction.action.ReadValue<float>(); } catch {}
-            Debug.Log($"[ItemInteraction:{name}] Action phase={interactAction.action.phase} value={v:0.00}");
+            float val = 0f;
+            try { val = interactAction.action.ReadValue<float>(); } catch { }
+            if (val <= 0.01f)
+            {
+                waitForReleaseAfterDialog = false;
+                pressInProgress = false; // allow the next *fresh* press
+                Debug.Log($"[ItemInteraction:{name}] Interact released after dialog; re-arming interaction.");
+            }
         }
     }
 
     private void OnTriggerEnter(Collider other)
     {
-        Debug.Log($"[ItemInteraction:{name}] OnTriggerEnter '{other.name}' tag='{other.tag}'.");
         if (other.CompareTag("Player"))
         {
             playerInRange = true;
@@ -100,7 +113,6 @@ public class ItemInteraction : MonoBehaviour
     }
     private void OnTriggerExit(Collider other)
     {
-        Debug.Log($"[ItemInteraction:{name}] OnTriggerExit '{other.name}' tag='{other.tag}'.");
         if (other.CompareTag("Player"))
         {
             playerInRange = false;
@@ -110,76 +122,99 @@ public class ItemInteraction : MonoBehaviour
 
     private void OnInteractStarted(InputAction.CallbackContext ctx)
     {
-        Debug.Log($"[ItemInteraction:{name}] Interact STARTED. control={ctx.control?.path} device={ctx.control?.device?.displayName}");
-        try { TryInteractOnce(); }
-        catch (System.Exception ex) { Debug.LogException(ex, this); }  // shows the exact line/file
+        // Ignore if dialog open or during cooldown or while waiting for release
+        if (DialogueManager.Instance?.IsActive() == true) return;
+        if (Time.unscaledTime < suppressUntil) return;
+        if (waitForReleaseAfterDialog) return;
+
+        TryInteractOnce();
     }
 
     private void OnInteractPerformed(InputAction.CallbackContext ctx)
     {
-        Debug.Log($"[ItemInteraction:{name}] Interact PERFORMED (if not already handled).");
+        if (DialogueManager.Instance?.IsActive() == true) return;
+        if (Time.unscaledTime < suppressUntil) return;
+        if (waitForReleaseAfterDialog) return;
+
         TryInteractOnce();
     }
 
     private void OnInteractCanceled(InputAction.CallbackContext ctx)
     {
-        Debug.Log($"[ItemInteraction:{name}] Interact CANCELED.");
-        pressInProgress = false; // ready for the next press
+        // Only unlock on release (prevents re-trigger loops)
+        pressInProgress = false;
     }
 
-    private void TryInteractOnce()
+    private void OnDialogActiveChanged(bool active)
     {
-        if (pressInProgress)
+        if (!active)
         {
-            Debug.Log($"[ItemInteraction:{name}] Press already handled; ignoring.");
-            return;
+            // Dialog just closed: add a brief cooldown and require release
+            suppressUntil = Time.unscaledTime + 0.25f;
+            waitForReleaseAfterDialog = true;
+            Debug.Log($"[ItemInteraction:{name}] Dialog closed -> suppress interactions until {suppressUntil:0.00} and wait for release.");
         }
+    }
 
-        if (!playerInRange)
+    void TryInteractOnce()
+    {
+        if (pressInProgress) return;
+        if (!playerInRange) return;
+        if (!itemData) { Debug.LogError("No ItemData"); return; }
+
+        pressInProgress = true; // cleared on Interact.canceled
+
+        // Prefer graph if present
+        if (itemData.graph != null)
         {
-            Debug.Log($"[ItemInteraction:{name}] Not in range; ignoring.");
-            return;
-        }
-
-        if (!itemData)
-        {
-            Debug.LogError($"[ItemInteraction:{name}] No ItemData.");
-            return;
-        }
-
-        pressInProgress = true;
-
-        // Show dialogue
-        if (DialogueManager.Instance != null)
-        {
-            DialogueManager.Instance.ShowDialogue(itemData.description);
-            Debug.Log($"[ItemInteraction:{name}] Showing dialogue.");
-        }
-        else Debug.LogError($"[ItemInteraction:{name}] DialogueManager.Instance is NULL.");
-
-        // Create clue if applicable
-        if (itemData.canBeClue && itemData.clueData != null)
-        {
-            if (ClueManager.Instance != null)
+            DialogueGraphRunner.Play(itemData.graph, result =>
             {
-                ClueManager.Instance.DiscoverClue(itemData.clueData);
-                Debug.Log($"[ItemInteraction:{name}] Discovered clue '{itemData.clueData.clueName}'.");
-            }
-            else Debug.LogError($"[ItemInteraction:{name}] ClueManager.Instance is NULL.");
+                if (result.pickupApproved)
+                    DoPickup();
+                // Do NOT unlock here; we wait for canceled or release-after-dialog logic
+            });
+            return;
         }
 
-        // Persist and hide
-        if (SaveSystem.Instance != null)
+        // Otherwise use authored linear list (if any)
+        if (itemData.dialogue != null && itemData.dialogue.Count > 0)
         {
-            SaveSystem.Instance.MarkItemCollected(itemData.Guid);
-            Debug.Log($"[ItemInteraction:{name}] Marked collected.");
-        }
-        else
-        {
-            Debug.LogWarning($"[ItemInteraction:{name}] SaveSystem missing; cannot persist.");
+            DialogueManager.Instance.StartSequence(itemData.dialogue, result =>
+            {
+                bool approved = false;
+                if (result != null && result.lastChoice != null &&
+                    result.lastChoice.semantic == ChoiceSemantic.PickupYes)
+                {
+                    approved = (result.lastChoiceIndex == result.lastChoice.yesIndex);
+                }
+                else
+                {
+                    approved = true; // default if no choice
+                }
+
+                if (approved) DoPickup();
+                // pressInProgress unlock via canceled / release-after-dialog
+            });
+            return;
         }
 
+        // Legacy fallback
+        DialogueManager.Instance.StartSequence(
+            new System.Collections.Generic.List<DialogueBlock> {
+                new DialogueBlock { type = BlockType.Text, text = itemData.description }
+            },
+            _ => { DoPickup(); }
+        );
+        // unlock handled as above
+    }
+
+    private void DoPickup()
+    {
+        Debug.Log($"[ItemInteraction:{name}] DoPickup called -> hiding object & saving.");
+        if (itemData.canBeClue && itemData.clueData != null)
+            ClueManager.Instance?.DiscoverClue(itemData.clueData);
+
+        SaveSystem.Instance?.MarkItemCollected(itemData.Guid);
         gameObject.SetActive(false);
-        Debug.Log($"[ItemInteraction:{name}] Pickup deactivated.");
     }
 }

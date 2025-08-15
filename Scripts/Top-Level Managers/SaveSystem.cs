@@ -154,4 +154,13 @@ public class SaveSystem : MonoBehaviour
     }
 
     public BoardLayoutSave GetBoardLayout() => data.board;
+
+    public IEnumerable<Link> GetConfirmedLinks() => data.board.confirmedLinks;
+public bool IsLinkConfirmed(string a, string b)
+{
+    foreach (var l in data.board.confirmedLinks)
+        if ((l.a == a && l.b == b) || (l.a == b && l.b == a)) return true;
+    return false;
+}
+
 }
