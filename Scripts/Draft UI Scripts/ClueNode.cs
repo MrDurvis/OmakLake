@@ -6,99 +6,124 @@ using UnityEngine.EventSystems;
 [RequireComponent(typeof(RectTransform))]
 public class ClueNode : MonoBehaviour, IBeginDragHandler, IDragHandler, IEndDragHandler
 {
+    public enum VisualStyle { CompactCircle, WideWithTitle }
+
+    [Header("Visual")]
+    [SerializeField] private VisualStyle style = VisualStyle.CompactCircle;
+    [SerializeField] private bool showTitle = false;     // <- off by default
+
     private RectTransform rect;
     private Image iconImage;
-    private TMP_Text titleText;
+    private RectTransform iconRect;                      // <- center anchor for lines
     private Image categoryRing;
+    private TMP_Text titleText;
     private CognitionBoard board;
 
     public string ClueGuid { get; private set; }
     public RectTransform Rect => rect;
+    public RectTransform LineAnchor => iconRect ? iconRect : rect;  // <- for lines
     public ClueData Data { get; private set; }
 
-    private void Awake()
+    void Awake()
     {
         rect = GetComponent<RectTransform>();
         EnsureUIExists();
+        ApplyStyle();
     }
 
     private void EnsureUIExists()
     {
-        // Background (optional)
+        // background (optional)
         if (!TryGetComponent<Image>(out _))
         {
             var bg = gameObject.AddComponent<Image>();
             bg.raycastTarget = true;
-            bg.color = new Color(0f, 0f, 0f, 0.35f);
+            bg.color = new Color(0f, 0f, 0f, 0.0f); // fully transparent by default
         }
 
-        // Icon
-        var icon = transform.Find("Icon") as RectTransform;
-        if (!icon)
+        // Icon (the circular photo)
+        iconRect = (transform.Find("Icon") as RectTransform);
+        if (!iconRect)
         {
-            icon = new GameObject("Icon", typeof(RectTransform), typeof(Image)).GetComponent<RectTransform>();
-            icon.SetParent(transform, false);
-            icon.sizeDelta = new Vector2(64, 64);
-            icon.anchoredPosition = new Vector2(-60, 0);
+            iconRect = new GameObject("Icon", typeof(RectTransform), typeof(Image)).GetComponent<RectTransform>();
+            iconRect.SetParent(transform, false);
         }
-        iconImage = icon.GetComponent<Image>();
+        iconImage = iconRect.GetComponent<Image>();
+        iconImage.preserveAspect = true;
+        iconRect.anchorMin = iconRect.anchorMax = new Vector2(0.5f, 0.5f);
+        iconRect.pivot = new Vector2(0.5f, 0.5f);
+        iconRect.anchoredPosition = Vector2.zero;
 
-        // Ring (optional)
-        var ring = transform.Find("Ring") as RectTransform;
-        if (!ring)
+        // Ring overlay
+        var ringRect = (transform.Find("Ring") as RectTransform);
+        if (!ringRect)
         {
-            ring = new GameObject("Ring", typeof(RectTransform), typeof(Image)).GetComponent<RectTransform>();
-            ring.SetParent(transform, false);
-            ring.sizeDelta = new Vector2(74, 74);
-            ring.anchoredPosition = new Vector2(-60, 0);
+            ringRect = new GameObject("Ring", typeof(RectTransform), typeof(Image)).GetComponent<RectTransform>();
+            ringRect.SetParent(transform, false);
         }
-        categoryRing = ring.GetComponent<Image>();
+        categoryRing = ringRect.GetComponent<Image>();
         categoryRing.raycastTarget = false;
+        ringRect.anchorMin = ringRect.anchorMax = new Vector2(0.5f, 0.5f);
+        ringRect.pivot = new Vector2(0.5f, 0.5f);
+        ringRect.anchoredPosition = Vector2.zero;
 
-        // Title
+        // Title (optional)
         var title = transform.Find("Title") as RectTransform;
         if (!title)
         {
             title = new GameObject("Title", typeof(RectTransform), typeof(TextMeshProUGUI)).GetComponent<RectTransform>();
             title.SetParent(transform, false);
-            title.sizeDelta = new Vector2(220, 60);
-            title.anchoredPosition = new Vector2(40, 0);
         }
         titleText = title.GetComponent<TextMeshProUGUI>();
-        if (titleText != null)
+        if (titleText)
         {
             titleText.textWrappingMode = TextWrappingModes.Normal;
             titleText.alignment = TextAlignmentOptions.MidlineLeft;
         }
 
-        if (rect == null) rect = GetComponent<RectTransform>();
-        if (rect != null) rect.sizeDelta = new Vector2(300, 90);
+        if (!rect) rect = GetComponent<RectTransform>();
+    }
+
+    private void ApplyStyle()
+    {
+        if (!rect) rect = GetComponent<RectTransform>();
+
+        if (style == VisualStyle.CompactCircle)
+        {
+            // Square node; centered icon + ring
+            rect.sizeDelta = new Vector2(110, 110);
+            iconRect.sizeDelta = new Vector2(100, 100);
+            if (categoryRing) categoryRing.rectTransform.sizeDelta = new Vector2(112, 112);
+            if (titleText) titleText.gameObject.SetActive(false);
+        }
+        else // WideWithTitle
+        {
+            rect.sizeDelta = new Vector2(300, 110);
+            iconRect.sizeDelta = new Vector2(90, 90);
+            iconRect.anchoredPosition = new Vector2(-90, 0);
+            if (categoryRing) categoryRing.rectTransform.sizeDelta = new Vector2(100, 100);
+
+            if (titleText)
+            {
+                titleText.gameObject.SetActive(showTitle);
+                titleText.rectTransform.sizeDelta = new Vector2(180, 80);
+                titleText.rectTransform.anchoredPosition = new Vector2(40, 0);
+                titleText.alignment = TextAlignmentOptions.MidlineLeft;
+            }
+        }
     }
 
     public void Initialize(CognitionBoard owner, ClueData data)
     {
-        // >>> NEW: ensure everything exists even if Awake hasn't run yet
-        if (rect == null || titleText == null || iconImage == null || categoryRing == null)
-        {
-            rect ??= GetComponent<RectTransform>() ?? gameObject.AddComponent<RectTransform>();
-            EnsureUIExists();
-        }
-
-        Debug.Log($"[ClueNode] Initialize | owner={(owner!=null)} data={(data!=null)} rect={(rect!=null)} title={(titleText!=null)} icon={(iconImage!=null)} ring={(categoryRing!=null)}", this);
-
-        if (owner == null || data == null)
-        {
-            Debug.LogError("[ClueNode] Initialize received null owner or data.", this);
-            return;
-        }
+        if (!rect || !iconRect || !iconImage || !categoryRing) { EnsureUIExists(); ApplyStyle(); }
 
         board = owner;
         Data = data;
         ClueGuid = data.Guid;
 
-        // Fill from ClueData
-        if (titleText) titleText.text = string.IsNullOrWhiteSpace(data.clueName) ? "(Unnamed Clue)" : data.clueName;
-        if (iconImage) iconImage.sprite = data.icon; // null sprite is OK
+        // Fill from data
+        if (iconImage) iconImage.sprite = data.icon;    // null OK
+
         if (categoryRing)
         {
             categoryRing.color = data.category switch
@@ -111,11 +136,23 @@ public class ClueNode : MonoBehaviour, IBeginDragHandler, IDragHandler, IEndDrag
             };
         }
 
-        if (rect) rect.anchoredPosition = Random.insideUnitCircle * 300f;
+        if (titleText)
+        {
+            titleText.text = string.IsNullOrWhiteSpace(data.clueName) ? "" : data.clueName;
+            titleText.gameObject.SetActive(showTitle && style == VisualStyle.WideWithTitle);
+        }
 
-        Debug.Log($"[ClueNode] Init OK | Guid={data.Guid} | Name='{data.clueName}' | HasIcon={(data.icon!=null)} | Category={data.category}", this);
+        // spawn at a random point so new nodes don't stack
+        rect.anchoredPosition = Random.insideUnitCircle * 300f;
     }
 
+    // Selection feedback (tiny scale bump)
+    public void SetSelected(bool sel)
+    {
+        transform.localScale = sel ? Vector3.one * 1.08f : Vector3.one;
+    }
+
+    // --- Drag handling ---
     public void OnBeginDrag(PointerEventData e) { board?.BeginNodeDrag(this); }
     public void OnDrag(PointerEventData e)
     {

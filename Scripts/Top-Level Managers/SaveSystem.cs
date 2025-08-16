@@ -35,33 +35,23 @@ public class SaveSystem : MonoBehaviour
     private string SavePath => Path.Combine(Application.persistentDataPath, "save.json");
     private GameSave data = new();
 
-    // This runs before the first scene loads, guaranteeing a SaveSystem exists
     [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.BeforeSceneLoad)]
     private static void EnsureExists()
     {
         if (Instance != null) return;
-
         var go = new GameObject("SaveSystem");
         go.AddComponent<SaveSystem>();
-        DontDestroyOnLoad(go); // root object, so no warning
+        DontDestroyOnLoad(go);
     }
 
     private void Awake()
     {
-        if (Instance && Instance != this)
-        {
-            Destroy(gameObject);
-            return;
-        }
-
+        if (Instance && Instance != this) { Destroy(gameObject); return; }
         Instance = this;
         DontDestroyOnLoad(gameObject);
         Load();
-
         Debug.Log($"[SaveSystem] Bootstrapped and loaded from '{SavePath}'.");
     }
-
-    // --- Persistence API ---
 
     public void Save()
     {
@@ -109,7 +99,6 @@ public class SaveSystem : MonoBehaviour
             Save();
         }
     }
-
     public bool IsItemCollected(string itemGuid) => data.collectedItems.Contains(itemGuid);
 
     // --- Clue tracking ---
@@ -121,7 +110,6 @@ public class SaveSystem : MonoBehaviour
             Save();
         }
     }
-
     public IEnumerable<string> GetDiscoveredClues() => data.discoveredClues;
 
     // --- Link tracking ---
@@ -134,33 +122,22 @@ public class SaveSystem : MonoBehaviour
         }
     }
 
+    // NEW: check if a pair is already confirmed
+    public bool IsLinkConfirmed(string a, string b)
+    {
+        return data.board.confirmedLinks.Exists(l => (l.a == a && l.b == b) || (l.a == b && l.b == a));
+    }
+
+    // NEW: expose confirmed list for restore
+    public IEnumerable<Link> GetConfirmedLinks() => data.board.confirmedLinks;
+
     // --- Board layout ---
     public void SetNodePosition(string clueGuid, Vector2 anchoredPos)
     {
         data.board.nodePositions[clueGuid] = anchoredPos;
         Save();
     }
-
-    public void SetBoardZoom(float z)
-    {
-        data.board.zoom = z;
-        Save();
-    }
-
-    public void SetBoardPan(Vector2 p)
-    {
-        data.board.pan = p;
-        Save();
-    }
-
+    public void SetBoardZoom(float z) { data.board.zoom = z; Save(); }
+    public void SetBoardPan(Vector2 p) { data.board.pan = p; Save(); }
     public BoardLayoutSave GetBoardLayout() => data.board;
-
-    public IEnumerable<Link> GetConfirmedLinks() => data.board.confirmedLinks;
-public bool IsLinkConfirmed(string a, string b)
-{
-    foreach (var l in data.board.confirmedLinks)
-        if ((l.a == a && l.b == b) || (l.a == b && l.b == a)) return true;
-    return false;
-}
-
 }

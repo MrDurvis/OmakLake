@@ -10,13 +10,14 @@ MonoBehaviour:
   m_Enabled: 1
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: 6234d3eed4f6dea4c94d7bd266b80334, type: 3}
-  m_Name: ClueCubeClue
+  m_Name: FlorianMurderScene
   m_EditorClassIdentifier: 
-  guid: 44da09b9-de94-4ac6-a16e-fb235b0a5a9d
-  clueName: ClueCube
-  description: A ClueCube, found on the Desk in Omak Motors.
-  icon: {fileID: 21300000, guid: 2ee12657dbde6274c8ed08df63d4e567, type: 3}
+  guid: e086dc5a-304f-4825-aeaa-e467e7e5f13b
+  clueName: FlorianMurderScene
+  description: Florian's Murder Scene Clue
+  icon: {fileID: 21300000, guid: 24ae1fb01aff8c849a5f4177ac7ffcf0, type: 3}
   category: 1
   relatedClues:
-  - {fileID: 0}
-  relatedClueGuids: []
+  - {fileID: 11400000, guid: f166550af5ea0a24a8c0e9559a533608, type: 2}
+  relatedClueGuids:
+  - 10288647-3277-4054-9b9d-a107a3871f37

@@ -7,13 +7,17 @@ public class ItemInteraction : MonoBehaviour
     [Header("Data")]
     [SerializeField] private ItemData itemData;
 
+    [Header("Interaction Rules")]
+    [Tooltip("If OFF, the object will NEVER be removed from the scene or marked collected. All other logic still runs.")]
+    [SerializeField] private bool canPickUp = true;
+
     [Header("Input")]
     [Tooltip("Bind to your Gameplay/Interact action (Gamepad South / Keyboard E).")]
     [SerializeField] private InputActionReference interactAction;
 
     private bool playerInRange;
-    private bool pressInProgress; // locks while the same press is held
-    private float suppressUntil;  // short cooldown window after dialog closes
+    private bool pressInProgress;       // locks while the same press is held
+    private float suppressUntil;        // short cooldown window after dialog closes
     private bool waitForReleaseAfterDialog; // require Interact to be fully released
 
     private void Reset()
@@ -24,7 +28,7 @@ public class ItemInteraction : MonoBehaviour
 
     private void Awake()
     {
-        Debug.Log($"[ItemInteraction:{name}] Awake. itemData={(itemData ? itemData.itemName : "NULL")} action={(interactAction ? interactAction.action?.name : "NULL")} map='{interactAction?.action?.actionMap?.name}'");
+        Debug.Log($"[ItemInteraction:{name}] Awake. itemData={(itemData ? itemData.itemName : "NULL")} canPickUp={canPickUp} action={(interactAction ? interactAction.action?.name : "NULL")} map='{interactAction?.action?.actionMap?.name}'");
     }
 
     private void OnEnable()
@@ -38,7 +42,10 @@ public class ItemInteraction : MonoBehaviour
             interactAction.action.started   += OnInteractStarted;
             interactAction.action.performed += OnInteractPerformed;
             interactAction.action.canceled  += OnInteractCanceled;
-            interactAction.action.Enable();
+
+            // ✅ SAFE: enable only if not already enabled (don’t fight other systems)
+            if (!interactAction.action.enabled)
+                interactAction.action.Enable();
 
             for (int i = 0; i < interactAction.action.bindings.Count; i++)
             {
@@ -47,7 +54,6 @@ public class ItemInteraction : MonoBehaviour
             }
         }
 
-        // Listen for dialog open/close to add a small cooldown + release requirement
         DialogueManager.OnDialogActiveChanged += OnDialogActiveChanged;
     }
 
@@ -58,11 +64,13 @@ public class ItemInteraction : MonoBehaviour
             interactAction.action.started   -= OnInteractStarted;
             interactAction.action.performed -= OnInteractPerformed;
             interactAction.action.canceled  -= OnInteractCanceled;
-            interactAction.action.Disable();
+
+            // 🚫 IMPORTANT: DO NOT Disable() here — shared action would be turned off for all items.
+            // interactAction.action.Disable();  <-- removed
         }
 
         DialogueManager.OnDialogActiveChanged -= OnDialogActiveChanged;
-        Debug.Log($"[ItemInteraction:{name}] Disabled interact action.");
+        Debug.Log($"[ItemInteraction:{name}] Unsubscribed from interact action.");
     }
 
     private void Start()
@@ -76,14 +84,15 @@ public class ItemInteraction : MonoBehaviour
             return;
         }
 
-        if (ss != null && ss.IsItemCollected(itemData.Guid))
+        // Only auto-hide if this item CAN be picked up and has been collected before
+        if (canPickUp && ss != null && ss.IsItemCollected(itemData.Guid))
         {
             Debug.Log($"[ItemInteraction:{name}] Already collected '{itemData.itemName}'. Hiding object.");
             gameObject.SetActive(false);
         }
         else
         {
-            Debug.Log($"[ItemInteraction:{name}] Not collected. Visible and waiting.");
+            Debug.Log($"[ItemInteraction:{name}] Not collected (or non-pickup). Visible and waiting.");
         }
     }
 
@@ -122,11 +131,9 @@ public class ItemInteraction : MonoBehaviour
 
     private void OnInteractStarted(InputAction.CallbackContext ctx)
     {
-        // Ignore if dialog open or during cooldown or while waiting for release
         if (DialogueManager.Instance?.IsActive() == true) return;
         if (Time.unscaledTime < suppressUntil) return;
         if (waitForReleaseAfterDialog) return;
-
         TryInteractOnce();
     }
 
@@ -135,14 +142,12 @@ public class ItemInteraction : MonoBehaviour
         if (DialogueManager.Instance?.IsActive() == true) return;
         if (Time.unscaledTime < suppressUntil) return;
         if (waitForReleaseAfterDialog) return;
-
         TryInteractOnce();
     }
 
     private void OnInteractCanceled(InputAction.CallbackContext ctx)
     {
-        // Only unlock on release (prevents re-trigger loops)
-        pressInProgress = false;
+        pressInProgress = false; // unlock on release (prevents re-trigger loops)
     }
 
     private void OnDialogActiveChanged(bool active)
@@ -158,11 +163,12 @@ public class ItemInteraction : MonoBehaviour
 
     void TryInteractOnce()
     {
+        if (PauseMenuController.IsPaused) return;
         if (pressInProgress) return;
         if (!playerInRange) return;
         if (!itemData) { Debug.LogError("No ItemData"); return; }
 
-        pressInProgress = true; // cleared on Interact.canceled
+        pressInProgress = true; // cleared on Interact.canceled or release-after-dialog
 
         // Prefer graph if present
         if (itemData.graph != null)
@@ -170,8 +176,9 @@ public class ItemInteraction : MonoBehaviour
             DialogueGraphRunner.Play(itemData.graph, result =>
             {
                 if (result.pickupApproved)
-                    DoPickup();
-                // Do NOT unlock here; we wait for canceled or release-after-dialog logic
+                    DoPickup(); // respects canPickUp inside
+
+                // unlock handled by canceled / release-after-dialog
             });
             return;
         }
@@ -192,8 +199,7 @@ public class ItemInteraction : MonoBehaviour
                     approved = true; // default if no choice
                 }
 
-                if (approved) DoPickup();
-                // pressInProgress unlock via canceled / release-after-dialog
+                if (approved) DoPickup(); // respects canPickUp
             });
             return;
         }
@@ -203,18 +209,25 @@ public class ItemInteraction : MonoBehaviour
             new System.Collections.Generic.List<DialogueBlock> {
                 new DialogueBlock { type = BlockType.Text, text = itemData.description }
             },
-            _ => { DoPickup(); }
+            _ => { DoPickup(); } // respects canPickUp
         );
-        // unlock handled as above
     }
 
     private void DoPickup()
     {
-        Debug.Log($"[ItemInteraction:{name}] DoPickup called -> hiding object & saving.");
+        Debug.Log($"[ItemInteraction:{name}] DoPickup called (canPickUp={canPickUp}).");
+
         if (itemData.canBeClue && itemData.clueData != null)
             ClueManager.Instance?.DiscoverClue(itemData.clueData);
 
-        SaveSystem.Instance?.MarkItemCollected(itemData.Guid);
-        gameObject.SetActive(false);
+        if (canPickUp)
+        {
+            SaveSystem.Instance?.MarkItemCollected(itemData.Guid);
+            gameObject.SetActive(false); // triggers OnDisable, but we no longer Disable() the action
+        }
+        else
+        {
+            Debug.Log($"[ItemInteraction:{name}] Pickup approved, but 'Can Pick Up?' is OFF — leaving object in scene.");
+        }
     }
 }

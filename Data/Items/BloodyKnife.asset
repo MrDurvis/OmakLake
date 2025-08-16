@@ -1,0 +1,32 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 1fe8da9fd39a7a14c96cdf9a336c2aaa, type: 3}
+  m_Name: BloodyKnife
+  m_EditorClassIdentifier: 
+  guid: 0ad31af9-cbed-41c8-b5fd-dc81d35da940
+  itemID: 2
+  itemName: Bloody Knife
+  description: A bloody knife :O
+  icon: {fileID: 21300000, guid: 9d4d95e5eec0af940906dff8eb53f033, type: 3}
+  canBeClue: 1
+  clueData: {fileID: 11400000, guid: f166550af5ea0a24a8c0e9559a533608, type: 2}
+  dialogue:
+  - type: 0
+    text: A bloody knife!
+    prompt: 
+    options: []
+    defaultIndex: 0
+    yesIndex: 0
+    semantic: 0
+  graph: {fileID: 0}
+  afterYesText: 
+  afterNoText: 

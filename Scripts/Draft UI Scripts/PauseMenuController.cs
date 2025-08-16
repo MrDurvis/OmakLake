@@ -24,15 +24,26 @@ public class PauseMenuController : MonoBehaviour
     [Header("Input (UI action map)")]
     [SerializeField] private InputActionAsset inputActions;
 
+    // NEW: gameplay map name + cached map (your gameplay map is called "Player")
+    [Header("Gameplay Action Map")]
+    [Tooltip("Name of the gameplay action map to disable while paused.")]
+    [SerializeField] private string gameplayMapName = "Player";
+    private InputActionMap gameplayMap; // NEW
+
     private InputActionMap uiActionMap;
     private InputAction navigateAction;
     private InputAction submitAction;
     private InputAction cancelAction;
 
     private int currentSelectionIndex = 0;
+
+    // Keep existing instance flags…
     private bool isPaused = false;
     private bool isMenuActive = false;
     private bool isInSubMenu = false;
+
+    // NEW: global pause flag other systems can query safely
+    public static bool IsPaused { get; private set; } = false;
 
     private float lastDPadVertical = 0f;
     private float dpadHoldStartTime = 0f;
@@ -45,10 +56,18 @@ public class PauseMenuController : MonoBehaviour
         submitAction   = uiActionMap?.FindAction("Submit");
         cancelAction   = uiActionMap?.FindAction("Cancel");
 
+        // NEW: cache the gameplay map ("Player")
+        gameplayMap    = inputActions?.FindActionMap(gameplayMapName, false);
+        if (gameplayMap == null)
+        {
+            Debug.LogWarning($"[PauseMenu] Could not find gameplay map '{gameplayMapName}'. " +
+                             $"World interactions may remain enabled while paused.");
+        }
+
         uiActionMap?.Disable();
 
-        if (pauseMenuUI) pauseMenuUI.SetActive(false);
-        if (cognitionBoardUI) cognitionBoardUI.SetActive(false);
+        if (pauseMenuUI)       pauseMenuUI.SetActive(false);
+        if (cognitionBoardUI)  cognitionBoardUI.SetActive(false);
         // NOTE: cognitionBoard itself may be inactive because its Awake() sets it false—that’s OK.
         UpdateButtonColors();
     }
@@ -67,6 +86,7 @@ public class PauseMenuController : MonoBehaviour
         if (cancelAction   != null) cancelAction.performed   -= OnCancel;
 
         uiActionMap?.Disable();
+        // NOTE: we do NOT touch gameplayMap here; resume handles re-enabling.
     }
 
     void Update()
@@ -154,18 +174,22 @@ public class PauseMenuController : MonoBehaviour
     {
         CloseDialogueIfOpen();
 
-        if (pauseMenuUI) pauseMenuUI.SetActive(true);
+        if (pauseMenuUI)      pauseMenuUI.SetActive(true);
         if (cognitionBoardUI) cognitionBoardUI.SetActive(false);
 
         Time.timeScale = 0f;
         isPaused = true;
+        IsPaused = true;     // NEW: update static flag
         isMenuActive = true;
         isInSubMenu = false;
 
         currentSelectionIndex = 0;
         UpdateButtonColors();
 
+        // Swap maps: disable gameplay, enable UI
+        gameplayMap?.Disable(); // NEW: prevents world Interact while paused
         uiActionMap?.Enable();
+
         ResetNavState();
     }
 
@@ -177,9 +201,13 @@ public class PauseMenuController : MonoBehaviour
         if (pauseMenuUI) pauseMenuUI.SetActive(false);
         Time.timeScale = 1f;
         isPaused = false;
+        IsPaused = false;    // NEW: update static flag
         isMenuActive = false;
 
+        // Swap back: disable UI, enable gameplay
         uiActionMap?.Disable();
+        gameplayMap?.Enable(); // NEW
+
         ResetNavState();
     }
 
@@ -217,7 +245,7 @@ public class PauseMenuController : MonoBehaviour
     public void CloseCognition()
     {
         if (cognitionBoardUI) cognitionBoardUI.SetActive(false);
-        if (cognitionBoard) cognitionBoard.gameObject.SetActive(false);
+        if (cognitionBoard)   cognitionBoard.gameObject.SetActive(false);
 
         // Return to the pause menu list
         if (pauseMenuUI) pauseMenuUI.SetActive(true);
