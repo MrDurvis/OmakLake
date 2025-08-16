@@ -4,6 +4,7 @@ using UnityEngine.InputSystem;
 using System.Collections;
 using System.Collections.Generic;
 using System.Text;
+using UnityEngine.SceneManagement;
 
 public class DialogueManager : MonoBehaviour
 {
@@ -23,14 +24,27 @@ public class DialogueManager : MonoBehaviour
     [SerializeField] private List<InputActionReference> disableWhileOpen = new();
 
     [Header("Typewriter")]
-    [SerializeField] private float charInterval     = 0.02f;
-    [SerializeField] private float shortPunctPause  = 0.06f;  // , ; : — – ) \n
-    [SerializeField] private float longPunctPause   = 0.18f;  // . ! ?
-    [SerializeField] private float minShowSeconds   = 0.15f;
+    [SerializeField] private float charInterval = 0.02f;
+    [SerializeField] private float shortPunctPause = 0.06f;   // , ; : — – ) \n
+    [SerializeField] private float longPunctPause = 0.18f;    // . ! ?
+    [SerializeField] private float minShowSeconds = 0.15f;
 
     [Header("Choice UI Style")]
-    [Tooltip("Optional prefab for choice labels. If left null, labels are created at runtime and styled from dialogueText.")]
+    [Tooltip("Optional prefab for choice labels. If null, labels are created & styled from dialogueText.")]
     [SerializeField] private TextMeshProUGUI choiceTextPrefab;
+
+    [Header("Scene Reload / Reset Safety")]
+    [Tooltip("On scene load we will auto-hide the dialogue panel and re-enable gameplay actions.")]
+    [SerializeField] private bool autoHideOnSceneLoad = true;
+
+    [Tooltip("Try to auto-bind to a DialogueUIBinder in the scene when opening or resetting.")]
+    [SerializeField] private bool autoFindUIOnOpen = true;
+
+    // === New fallback settings ===
+    [Header("Auto-Bind Fallbacks")]
+    [SerializeField] private string fallbackPanelName = "DialogueUI";
+    [SerializeField] private string fallbackTextName = "DialogueText";
+    [SerializeField] private string fallbackPanelTag = "";
 
     // -------- state --------
     private bool isVisible;
@@ -55,7 +69,7 @@ public class DialogueManager : MonoBehaviour
     private const float NAV_REPEAT = 0.15f;
 
     private const string SHORT_SET = ",;:—–)\n";
-    private const string LONG_SET  = ".!?";
+    private const string LONG_SET = ".!?";
 
     private void Awake()
     {
@@ -63,48 +77,53 @@ public class DialogueManager : MonoBehaviour
         Instance = this;
         DontDestroyOnLoad(gameObject);
 
-        if (!dialogueUI)  Debug.LogError("[DialogueManager] dialogueUI not assigned.");
-        if (!dialogueText) Debug.LogError("[DialogueManager] dialogueText not assigned.");
-
         if (dialogueUI) dialogueUI.SetActive(false);
+        if (dialogueText) DecoupleMaterial(dialogueText);
 
-        // Make sure the main dialogue text uses a LOCAL material instance (not a shared preset)
-        DecoupleMaterial(dialogueText);
+        SceneManager.sceneLoaded += OnSceneLoaded;
+    }
+
+    private void OnDestroy()
+    {
+        if (Instance == this) SceneManager.sceneLoaded -= OnSceneLoaded;
+    }
+
+    private void OnSceneLoaded(Scene _, LoadSceneMode __)
+    {
+        if (!autoHideOnSceneLoad) return;
+        ForceHideAndReset();
     }
 
     private void OnEnable()
     {
         if (submitAction?.action != null)
         {
-            submitAction.action.started   += OnSubmitStarted;
+            submitAction.action.started += OnSubmitStarted;
             submitAction.action.performed += OnSubmitPerformed;
-            submitAction.action.canceled  += OnSubmitCanceled;
+            submitAction.action.canceled += OnSubmitCanceled;
             submitAction.action.Enable();
         }
         if (cancelAction?.action != null)
         {
-            cancelAction.action.started   += OnCancelStarted;
+            cancelAction.action.started += OnCancelStarted;
             cancelAction.action.performed += OnCancelPerformed;
             cancelAction.action.Enable();
         }
-        if (navigateAction?.action != null)
-        {
-            navigateAction.action.Enable();
-        }
+        if (navigateAction?.action != null) navigateAction.action.Enable();
     }
 
     private void OnDisable()
     {
         if (submitAction?.action != null)
         {
-            submitAction.action.started   -= OnSubmitStarted;
+            submitAction.action.started -= OnSubmitStarted;
             submitAction.action.performed -= OnSubmitPerformed;
-            submitAction.action.canceled  -= OnSubmitCanceled;
+            submitAction.action.canceled -= OnSubmitCanceled;
             submitAction.action.Disable();
         }
         if (cancelAction?.action != null)
         {
-            cancelAction.action.started   -= OnCancelStarted;
+            cancelAction.action.started -= OnCancelStarted;
             cancelAction.action.performed -= OnCancelPerformed;
             cancelAction.action.Disable();
         }
@@ -144,21 +163,47 @@ public class DialogueManager : MonoBehaviour
 
     public void StartSequence(List<DialogueBlock> blocks, System.Action<SequenceResult> onComplete)
     {
-        if (isVisible)
-        {
-            Debug.Log("[DialogueManager] Sequence requested while dialog open — ignoring.");
-            return;
-        }
-        if (blocks == null || blocks.Count == 0) { Debug.LogWarning("[DialogueManager] Empty sequence."); return; }
+        if (isVisible) return;
+        if (blocks == null || blocks.Count == 0) return;
         if (sequenceCo != null) StopCoroutine(sequenceCo);
         onSequenceComplete = onComplete;
         sequenceCo = StartCoroutine(RunSequence(blocks));
     }
 
-    // Aliases used by PauseMenuController
     public bool IsActive() => isVisible;
     public bool IsDialogueActive() => isVisible;
     public void Hide() => ClosePanel();
+
+    public void ForceHideAndReset()
+    {
+        if (autoFindUIOnOpen) TryAutoFindUI();
+
+        if (typingCo != null) { StopCoroutine(typingCo); typingCo = null; }
+        isTyping = false;
+        fastForwardRequested = false;
+        waitForSubmitRelease = false;
+
+        ClearChoices();
+
+        if (dialogueUI) dialogueUI.SetActive(false);
+        if (dialogueText) dialogueText.text = string.Empty;
+
+        isVisible = false;
+
+        SafeEnableBlockedActions();
+        OnDialogActiveChanged?.Invoke(false);
+
+        // NEW: ensure UI input map is ready after reset
+        EnsureDialogueInputsEnabled();
+    }
+
+    public void BindUI(GameObject panel, TMP_Text text)
+    {
+        dialogueUI = panel;
+        dialogueText = text;
+        DecoupleMaterial(dialogueText);
+        if (dialogueUI) dialogueUI.SetActive(false);
+    }
 
     // -------- Sequence driver --------
     private IEnumerator RunSequence(List<DialogueBlock> blocks)
@@ -175,7 +220,7 @@ public class DialogueManager : MonoBehaviour
             {
                 yield return ShowTextAndWait(b.text);
             }
-            else // Choice
+            else
             {
                 yield return ShowChoiceAndWait(b);
                 result.lastChoice = b;
@@ -193,7 +238,6 @@ public class DialogueManager : MonoBehaviour
         sequenceCo = null;
     }
 
-    // ---- Text step ----
     private IEnumerator ShowTextAndWait(string message)
     {
         PrepareForText();
@@ -205,11 +249,9 @@ public class DialogueManager : MonoBehaviour
         yield return WaitForClosePress();
     }
 
-    // ---- Choice step ----
     private IEnumerator ShowChoiceAndWait(DialogueBlock block)
     {
         choiceResultIndex = -1;
-
         string prompt = block.prompt ?? "";
         PrepareForText();
 
@@ -239,12 +281,30 @@ public class DialogueManager : MonoBehaviour
         yield return null;
     }
 
-    // -------- Open/Close panel + locks --------
+    // -------- Open/Close panel --------
     private void OpenPanel()
     {
+        if (autoFindUIOnOpen) TryAutoFindUI();
+        if (!dialogueUI || !dialogueText)
+        {
+            Debug.LogError("[DialogueManager] Cannot open — UI not bound.");
+            isVisible = false;
+            return;
+        }
+
         EnsureDialogueInputsEnabled();
 
         dialogueText.text = string.Empty;
+
+        // NEW: force visible/interactive
+        var cg = dialogueUI.GetComponent<CanvasGroup>();
+        if (!cg) cg = dialogueUI.AddComponent<CanvasGroup>();
+        cg.alpha = 1f;
+        cg.interactable = true;
+        cg.blocksRaycasts = true;
+        var canvas = dialogueUI.GetComponentInParent<Canvas>(true);
+        if (canvas) canvas.enabled = true;
+
         dialogueUI.SetActive(true);
 
         isVisible = true;
@@ -264,46 +324,39 @@ public class DialogueManager : MonoBehaviour
 
         ClearChoices();
 
-        dialogueUI.SetActive(false);
+        if (dialogueUI) dialogueUI.SetActive(false);
         isVisible = false;
 
         RestoreBlockedActions();
         OnDialogActiveChanged?.Invoke(false);
     }
 
-    // -------- Input handlers (A/B) --------
+    // -------- Input handlers --------
     private void OnSubmitStarted(InputAction.CallbackContext _)
     {
         if (!isVisible) return;
-
-        // While typing, only allow fast-forward AFTER first release
         if (isTyping)
         {
             if (waitForSubmitRelease) return;
             fastForwardRequested = true;
             return;
         }
-
         if (waitForSubmitRelease) return;
-
         if (!IsShowingChoices()) TryCloseBubble();
     }
     private void OnSubmitPerformed(InputAction.CallbackContext _) { }
-    private void OnSubmitCanceled (InputAction.CallbackContext _) { if (isVisible) waitForSubmitRelease = false; }
+    private void OnSubmitCanceled(InputAction.CallbackContext _) { if (isVisible) waitForSubmitRelease = false; }
 
     private void OnCancelStarted(InputAction.CallbackContext _)
     {
         if (!isVisible) return;
-
         if (isTyping)
         {
             if (waitForSubmitRelease) return;
             fastForwardRequested = true;
             return;
         }
-
         if (waitForSubmitRelease) return;
-
         if (!IsShowingChoices()) TryCloseBubble();
     }
     private void OnCancelPerformed(InputAction.CallbackContext _) { }
@@ -311,7 +364,6 @@ public class DialogueManager : MonoBehaviour
     private void TryCloseBubble()
     {
         if (Time.unscaledTime - shownAt < minShowSeconds) return;
-        // Closed by WaitForClosePress
     }
 
     private IEnumerator WaitForClosePress()
@@ -319,22 +371,25 @@ public class DialogueManager : MonoBehaviour
         float earliest = Time.unscaledTime + minShowSeconds;
         while (Time.unscaledTime < earliest) yield return null;
 
+        // release guard
+        while (waitForSubmitRelease) yield return null;
+
         bool pressed = false;
         while (!pressed)
         {
             if ((submitAction != null && submitAction.action.triggered) ||
-                (cancelAction  != null && cancelAction.action.triggered))
+                (cancelAction != null && cancelAction.action.triggered))
                 pressed = true;
             yield return null;
         }
     }
 
-    // -------- Typewriter with punctuation pauses --------
     private IEnumerator Typewriter(string msg)
     {
+        if (isTyping) yield break; // guard
         isTyping = true;
-        fastForwardRequested = false;     // start normal speed
-        dialogueText.text = string.Empty;
+        fastForwardRequested = false;
+        if (dialogueText) dialogueText.text = string.Empty;
 
         var sb = new StringBuilder(msg.Length + 16);
         int i = 0;
@@ -343,50 +398,45 @@ public class DialogueManager : MonoBehaviour
         {
             char c = msg[i];
 
-            // Preserve rich-text tags intact
             if (c == '<')
             {
                 int close = msg.IndexOf('>', i);
                 if (close >= 0)
                 {
                     sb.Append(msg, i, close - i + 1);
-                    dialogueText.text = sb.ToString();
+                    if (dialogueText) dialogueText.text = sb.ToString();
                     i = close + 1;
                     continue;
                 }
             }
 
-            // Ellipsis token "..."
             if (c == '.' && i + 2 < msg.Length && msg[i + 1] == '.' && msg[i + 2] == '.')
             {
                 sb.Append("...");
-                dialogueText.text = sb.ToString();
+                if (dialogueText) dialogueText.text = sb.ToString();
                 i += 3;
                 if (!fastForwardRequested) yield return PauseRealtime(longPunctPause);
                 continue;
             }
 
-            // Append single char
             sb.Append(c);
-            dialogueText.text = sb.ToString();
+            if (dialogueText) dialogueText.text = sb.ToString();
             i++;
 
-            // Per-character delay
             if (!fastForwardRequested && charInterval > 0f)
                 yield return new WaitForSecondsRealtime(charInterval);
 
-            // Punctuation pauses
             if (!fastForwardRequested)
             {
-                if (c == '\n')                      yield return PauseRealtime(shortPunctPause);
-                else if (LONG_SET.IndexOf(c) >= 0)  yield return PauseRealtime(longPunctPause);
+                if (c == '\n') yield return PauseRealtime(shortPunctPause);
+                else if (LONG_SET.IndexOf(c) >= 0) yield return PauseRealtime(longPunctPause);
                 else if (SHORT_SET.IndexOf(c) >= 0) yield return PauseRealtime(shortPunctPause);
             }
         }
 
         isTyping = false;
         typingCo = null;
-        fastForwardRequested = false; // ready for next bubble
+        fastForwardRequested = false;
     }
 
     private IEnumerator PauseRealtime(float seconds)
@@ -402,14 +452,21 @@ public class DialogueManager : MonoBehaviour
 
     private void PrepareForText()
     {
-        dialogueText.text = string.Empty;
+        if (dialogueText) dialogueText.text = string.Empty;
         shownAt = Time.unscaledTime;
         waitForSubmitRelease = true;
         fastForwardRequested = false;
         ClearChoices();
+        StartCoroutine(ReleaseGuard());
     }
 
-    // -------- Choice UI helpers --------
+    private IEnumerator ReleaseGuard()
+    {
+        float end = Time.unscaledTime + 0.25f;
+        while (waitForSubmitRelease && Time.unscaledTime < end) yield return null;
+        waitForSubmitRelease = false;
+    }
+
     private bool IsShowingChoices() => choiceRow != null && choiceRow.gameObject.activeSelf;
 
     private void BuildChoices(List<string> options, int startIndex)
@@ -418,12 +475,12 @@ public class DialogueManager : MonoBehaviour
 
         if (choiceRow == null)
         {
+            if (!dialogueUI) return;
             var rowGO = new GameObject("ChoiceRow", typeof(RectTransform));
             choiceRow = rowGO.GetComponent<RectTransform>();
             choiceRow.SetParent(dialogueUI.transform, false);
-            choiceRow.anchorMin = new Vector2(0.5f, 0);
-            choiceRow.anchorMax = new Vector2(0.5f, 0);
-            choiceRow.pivot     = new Vector2(0.5f, 0);
+            choiceRow.anchorMin = choiceRow.anchorMax = new Vector2(0.5f, 0);
+            choiceRow.pivot = new Vector2(0.5f, 0);
             choiceRow.anchoredPosition = new Vector2(0, 20);
             choiceRow.sizeDelta = new Vector2(600, 40);
         }
@@ -437,32 +494,24 @@ public class DialogueManager : MonoBehaviour
         for (int i = 0; i < options.Count; i++)
         {
             TextMeshProUGUI tm;
-
             if (choiceTextPrefab != null)
-            {
                 tm = Instantiate(choiceTextPrefab, choiceRow);
-            }
             else
             {
                 var go = new GameObject("Opt_" + i, typeof(RectTransform), typeof(TextMeshProUGUI));
                 tm = go.GetComponent<TextMeshProUGUI>();
                 tm.rectTransform.SetParent(choiceRow, false);
-
-                // Copy readable style (size, alignment, vertex color, etc.)
                 CopyTextStyle(dialogueText, tm);
             }
 
-            // <<< Ensure choice uses dialogue font + a LOCAL clone of its preset >>>
             ApplyDialogueMaterial(tm);
 
-            // Position
             var r = tm.rectTransform;
             r.anchorMin = r.anchorMax = new Vector2(0.5f, 0.5f);
             r.pivot = new Vector2(0.5f, 0.5f);
             r.sizeDelta = new Vector2(160, 40);
             r.anchoredPosition = new Vector2(startX + spacing * i, 0);
 
-            // Content
             tm.alignment = TextAlignmentOptions.Center;
             tm.text = options[i] ?? "";
 
@@ -498,7 +547,6 @@ public class DialogueManager : MonoBehaviour
         }
     }
 
-    // -------- Input gating --------
     private void BlockActions()
     {
         reenableBuffer.Clear();
@@ -507,7 +555,6 @@ public class DialogueManager : MonoBehaviour
         {
             var action = aref?.action;
             if (action == null) continue;
-
             if (submitAction != null && action == submitAction.action) continue;
             if (cancelAction != null && action == cancelAction.action) continue;
             if (navigateAction != null && action == navigateAction.action) continue;
@@ -527,65 +574,128 @@ public class DialogueManager : MonoBehaviour
         reenableBuffer.Clear();
     }
 
-    // --- ensure Submit/Cancel/Navigate are enabled when opening the dialog ---
-    private void EnsureDialogueInputsEnabled()
+    private void SafeEnableBlockedActions()
     {
-        try { submitAction?.action?.Enable(); } catch {}
-        try { cancelAction?.action?.Enable(); } catch {}
-        try { navigateAction?.action?.Enable(); } catch {}
-
-        try { submitAction?.action?.actionMap?.Enable(); } catch {}
-        try { cancelAction?.action?.actionMap?.Enable(); } catch {}
-        try { navigateAction?.action?.actionMap?.Enable(); } catch {}
+        foreach (var aref in disableWhileOpen)
+        {
+            var a = aref?.action;
+            try { if (a != null && !a.enabled) a.Enable(); } catch { }
+        }
     }
 
-    // --- style helpers ---
+    private void EnsureDialogueInputsEnabled()
+    {
+        try { submitAction?.action?.Enable(); } catch { }
+        try { cancelAction?.action?.Enable(); } catch { }
+        try { navigateAction?.action?.Enable(); } catch { }
+
+        try { submitAction?.action?.actionMap?.Enable(); } catch { }
+        try { cancelAction?.action?.actionMap?.Enable(); } catch { }
+        try { navigateAction?.action?.actionMap?.Enable(); } catch { }
+    }
+
+    private void TryAutoFindUI()
+    {
+        if (dialogueUI && dialogueText) return;
+
+        var binder = FindFirstObjectByType<DialogueUIBinder>(FindObjectsInactive.Include);
+if (binder != null)
+{
+    binder.TryBindNow(); // call it (doesn't return anything)
+    if (dialogueUI && dialogueText)
+    {
+        DecoupleMaterial(dialogueText);
+        return;
+    }
+}
+
+        if (!dialogueUI && !string.IsNullOrEmpty(fallbackPanelTag))
+        {
+            var tagged = GameObject.FindGameObjectWithTag(fallbackPanelTag);
+            if (tagged != null) dialogueUI = tagged;
+        }
+
+        if (!dialogueUI && !string.IsNullOrEmpty(fallbackPanelName))
+        {
+            var foundPanel = GameObject.Find(fallbackPanelName);
+            if (foundPanel != null) dialogueUI = foundPanel;
+        }
+
+        if (!dialogueUI)
+        {
+            foreach (var canvas in FindObjectsByType<Canvas>(FindObjectsInactive.Include, FindObjectsSortMode.None))
+            {
+                var t = canvas.GetComponentInChildren<TMP_Text>(true);
+                if (t != null)
+                {
+                    dialogueUI = canvas.gameObject;
+                    dialogueText = t;
+                    break;
+                }
+            }
+        }
+
+        if (dialogueUI && !dialogueText)
+        {
+            TMP_Text t = null;
+            if (!string.IsNullOrEmpty(fallbackTextName))
+            {
+                var tr = dialogueUI.transform.Find(fallbackTextName);
+                if (tr) t = tr.GetComponent<TMP_Text>();
+            }
+            if (!t) t = dialogueUI.GetComponentInChildren<TMP_Text>(true);
+
+            if (t)
+            {
+                dialogueText = t;
+                DecoupleMaterial(dialogueText);
+            }
+        }
+    }
+
+    [ContextMenu("DialogueManager/Validate Setup")]
+    private void ValidateSetup()
+    {
+        Debug.Log($"[DialogueManager] UI={(dialogueUI ? dialogueUI.name : "null")}  Text={(dialogueText ? dialogueText.name : "null")}");
+        Debug.Log($" submit={(submitAction?.action != null)} cancel={(cancelAction?.action != null)} navigate={(navigateAction?.action != null)}");
+    }
+
     private void CopyTextStyle(TMP_Text from, TMP_Text to)
     {
         if (from == null || to == null) return;
-
-        to.font               = from.font;
-        to.fontSize           = from.fontSize;
-        to.enableAutoSizing   = from.enableAutoSizing;
-        to.fontStyle          = from.fontStyle;
-        to.alignment          = from.alignment;
-        to.color              = from.color; // vertex color (per-instance)
+        to.font = from.font;
+        to.fontSize = from.fontSize;
+        to.enableAutoSizing = from.enableAutoSizing;
+        to.fontStyle = from.fontStyle;
+        to.alignment = from.alignment;
+        to.color = from.color;
         to.textWrappingMode = from.textWrappingMode;
-        to.richText           = from.richText;
-        to.lineSpacing        = from.lineSpacing;
-        to.wordSpacing        = from.wordSpacing;
-        to.characterSpacing   = from.characterSpacing;
-        to.overflowMode       = from.overflowMode;
-        to.margin             = from.margin;
-
+        to.richText = from.richText;
+        to.lineSpacing = from.lineSpacing;
+        to.wordSpacing = from.wordSpacing;
+        to.characterSpacing = from.characterSpacing;
+        to.overflowMode = from.overflowMode;
+        to.margin = from.margin;
         if (to is TextMeshProUGUI ugui) ugui.raycastTarget = false;
     }
 
-    // Make sure a TMP label uses the SAME font + a LOCAL clone of the dialogue's preset
     private void ApplyDialogueMaterial(TMP_Text t)
     {
         if (t == null || dialogueText == null) return;
-
-        // Make sure the font asset matches
         t.font = dialogueText.font;
-
-        // Clone the preset used by the dialogue text so this label has its own local instance
         var sharedPreset = dialogueText.fontSharedMaterial;
         if (sharedPreset != null)
             t.fontMaterial = new Material(sharedPreset);
-
-        // also match vertex color (safe)
         t.color = dialogueText.color;
     }
 
-    // Ensure our dialogue text itself is not editing a shared preset at runtime
     private void DecoupleMaterial(TMP_Text t)
     {
         if (t == null) return;
         var shared = t.fontSharedMaterial;
-        var local  = t.fontMaterial;
+        var local = t.fontMaterial;
         if (ReferenceEquals(shared, local))
-            t.fontMaterial = new Material(shared); // unique per-instance
+            t.fontMaterial = new Material(shared);
     }
 }
 

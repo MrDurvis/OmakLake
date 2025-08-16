@@ -3,6 +3,7 @@ using UnityEngine.UI;
 using TMPro;
 using UnityEngine.EventSystems;
 using UnityEngine.InputSystem;
+using UnityEngine.SceneManagement;
 
 public class PauseMenuController : MonoBehaviour
 {
@@ -49,15 +50,21 @@ public class PauseMenuController : MonoBehaviour
     private float dpadHoldStartTime = 0f;
     [SerializeField] private float moveCooldown = 0.2f;
 
+    [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
+    private static void ResetStaticPauseFlag()
+{
+    IsPaused = false;
+}
+
     void Awake()
     {
-        uiActionMap    = inputActions?.FindActionMap("UI", true);
+        uiActionMap = inputActions?.FindActionMap("UI", true);
         navigateAction = uiActionMap?.FindAction("Navigate");
-        submitAction   = uiActionMap?.FindAction("Submit");
-        cancelAction   = uiActionMap?.FindAction("Cancel");
+        submitAction = uiActionMap?.FindAction("Submit");
+        cancelAction = uiActionMap?.FindAction("Cancel");
 
         // NEW: cache the gameplay map ("Player")
-        gameplayMap    = inputActions?.FindActionMap(gameplayMapName, false);
+        gameplayMap = inputActions?.FindActionMap(gameplayMapName, false);
         if (gameplayMap == null)
         {
             Debug.LogWarning($"[PauseMenu] Could not find gameplay map '{gameplayMapName}'. " +
@@ -66,8 +73,8 @@ public class PauseMenuController : MonoBehaviour
 
         uiActionMap?.Disable();
 
-        if (pauseMenuUI)       pauseMenuUI.SetActive(false);
-        if (cognitionBoardUI)  cognitionBoardUI.SetActive(false);
+        if (pauseMenuUI) pauseMenuUI.SetActive(false);
+        if (cognitionBoardUI) cognitionBoardUI.SetActive(false);
         // NOTE: cognitionBoard itself may be inactive because its Awake() sets it false—that’s OK.
         UpdateButtonColors();
     }
@@ -75,15 +82,15 @@ public class PauseMenuController : MonoBehaviour
     void OnEnable()
     {
         if (navigateAction != null) navigateAction.performed += OnNavigate;
-        if (submitAction   != null) submitAction.performed   += OnSubmit;
-        if (cancelAction   != null) cancelAction.performed   += OnCancel;
+        if (submitAction != null) submitAction.performed += OnSubmit;
+        if (cancelAction != null) cancelAction.performed += OnCancel;
     }
 
     void OnDisable()
     {
         if (navigateAction != null) navigateAction.performed -= OnNavigate;
-        if (submitAction   != null) submitAction.performed   -= OnSubmit;
-        if (cancelAction   != null) cancelAction.performed   -= OnCancel;
+        if (submitAction != null) submitAction.performed -= OnSubmit;
+        if (cancelAction != null) cancelAction.performed -= OnCancel;
 
         uiActionMap?.Disable();
         // NOTE: we do NOT touch gameplayMap here; resume handles re-enabling.
@@ -174,7 +181,7 @@ public class PauseMenuController : MonoBehaviour
     {
         CloseDialogueIfOpen();
 
-        if (pauseMenuUI)      pauseMenuUI.SetActive(true);
+        if (pauseMenuUI) pauseMenuUI.SetActive(true);
         if (cognitionBoardUI) cognitionBoardUI.SetActive(false);
 
         Time.timeScale = 0f;
@@ -234,6 +241,10 @@ public class PauseMenuController : MonoBehaviour
             // Optional: refresh layout from save when opening
             cognitionBoard.RestoreLayoutFromSave();
         }
+        if (cognitionBoard)
+        {
+            cognitionBoard.NotifyBoardOpened();
+        }
 
         // Clear UI selection so Submit doesn't trigger menu buttons behind the board
         if (EventSystem.current) EventSystem.current.SetSelectedGameObject(null);
@@ -245,7 +256,7 @@ public class PauseMenuController : MonoBehaviour
     public void CloseCognition()
     {
         if (cognitionBoardUI) cognitionBoardUI.SetActive(false);
-        if (cognitionBoard)   cognitionBoard.gameObject.SetActive(false);
+        if (cognitionBoard) cognitionBoard.gameObject.SetActive(false);
 
         // Return to the pause menu list
         if (pauseMenuUI) pauseMenuUI.SetActive(true);
@@ -297,4 +308,35 @@ public class PauseMenuController : MonoBehaviour
         var dm = DialogueManager.Instance;
         if (dm != null && dm.IsActive()) dm.Hide();
     }
+    
+    public void ResetGame()
+{
+    // Make sure we’re truly unpaused at the code level
+    Time.timeScale = 1f;
+    isPaused = false;
+    IsPaused = false;
+    isMenuActive = false;
+    isInSubMenu = false;
+
+    // Clean UI state
+    if (isInSubMenu) CloseCognition();
+    if (pauseMenuUI) pauseMenuUI.SetActive(false);
+
+    // Ensure input maps are sane before the reload
+    uiActionMap?.Disable();   // stop reading UI during reload
+    gameplayMap?.Enable();    // <- IMPORTANT: don’t leave gameplay disabled
+
+    // Optional: hard-close any open dialogue to clear guards
+    DialogueManager.Instance?.ForceHideAndReset();
+
+    // Wipe persisted + runtime
+    SaveSystem.Instance?.WipeSave(deleteFile: true);
+    ClueManager.Instance?.ClearAllRuntime();
+
+    // Reload current scene
+    var scene = SceneManager.GetActiveScene();
+    SceneManager.LoadScene(scene.name, LoadSceneMode.Single);
+}
+
+
 }
