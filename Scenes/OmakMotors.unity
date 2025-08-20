@@ -2275,7 +2275,7 @@ Transform:
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 301985228}
   serializedVersion: 2
-  m_LocalRotation: {x: 0.08480415, y: -0.8133106, z: 0.12263886, w: 0.56240016}
+  m_LocalRotation: {x: 0.08480413, y: -0.8133106, z: 0.12263884, w: 0.5624001}
   m_LocalPosition: {x: -947.0684, y: -489.9599, z: 487.73862}
   m_LocalScale: {x: 1, y: 1, z: 1}
   m_ConstrainProportionsScale: 0
@@ -3731,7 +3731,17 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: efbed507f6f96014f8d1374e664dd682, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
+  manager: {fileID: 0}
+  dialoguePanel: {fileID: 0}
   dialogueText: {fileID: 1450615599}
+  locateStrategy: 0
+  panelTag: 
+  panelName: DialogueUI
+  textName: DialogueText
+  bindOnAwake: 1
+  decoupleMaterial: 1
+  ensureVisibility: 1
+  verboseLogs: 1
 --- !u!1 &1370324218
 GameObject:
   m_ObjectHideFlags: 0
@@ -4594,6 +4604,8 @@ GameObject:
   - component: {fileID: 1738702818}
   - component: {fileID: 1738702817}
   - component: {fileID: 1738702816}
+  - component: {fileID: 1738702819}
+  - component: {fileID: 1738702820}
   m_Layer: 5
   m_Name: CognitionBoard
   m_TagString: Untagged
@@ -4647,6 +4659,18 @@ MonoBehaviour:
   nodePopStagger: 0.05
   navigateAction: {fileID: -8784545083839296357, guid: 052faaac586de48259a63d0c4782560b, type: 3}
   submitAction: {fileID: 392368643174621059, guid: 052faaac586de48259a63d0c4782560b, type: 3}
+  zoomAction: {fileID: -5203480762245789106, guid: 052faaac586de48259a63d0c4782560b, type: 3}
+  freeLookAction: {fileID: -2056453221807334805, guid: 052faaac586de48259a63d0c4782560b, type: 3}
+  freeLookDeadZone: 0.25
+  invertFreelookY: 0
+  panSpeedInitial: 700
+  panSpeedRampDuration: 0.5
+  panSpeedMax: 2200
+  zoomStep: 0.002
+  zoomRateInitial: 300
+  zoomRateRampDuration: 3
+  zoomRateMax: 900
+  keepSelectedCentered: 1
   navDeadZone: 0.5
   navFirstDelay: 0.25
   navRepeat: 0.15
@@ -4654,6 +4678,13 @@ MonoBehaviour:
   minHopDistance: 30
   selectedScale: 1.08
   centerOnSubmit: 1
+  viewportRect: {fileID: 1738702815}
+  minNodeSpacing: 200
+  relatedMaxDistance: 200
+  spawnRadiusStart: 80
+  spawnRadiusStep: 60
+  spawnRadiusMax: 1200
+  boardCamera: {fileID: 1738702820}
 --- !u!114 &1738702817
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -4692,6 +4723,40 @@ CanvasRenderer:
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 1738702814}
   m_CullTransparentMesh: 1
+--- !u!114 &1738702819
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1738702814}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 3312d7739989d2b4e91e6319e9a96d76, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  m_Padding: {x: 0, y: 0, z: 0, w: 0}
+  m_Softness: {x: 0, y: 0}
+--- !u!114 &1738702820
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1738702814}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 843a603222642d64cbc3a8f49f40fb8b, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  viewport: {fileID: 1738702815}
+  content: {fileID: 159408076}
+  minZoom: 0.25
+  maxZoom: 3
+  zoomLerpSpeed: 700
+  panLerpSpeed: 1000
+  clampToContentBounds: 1
+  extraPadding: {x: 200, y: 200}
 --- !u!1 &1787238550
 GameObject:
   m_ObjectHideFlags: 0
@@ -4896,6 +4961,9 @@ MonoBehaviour:
   choiceTextPrefab: {fileID: 0}
   autoHideOnSceneLoad: 1
   autoFindUIOnOpen: 1
+  fallbackPanelName: DialogueUI
+  fallbackTextName: DialogueText
+  fallbackPanelTag: 
 --- !u!4 &1992484339
 Transform:
   m_ObjectHideFlags: 0

@@ -19,16 +19,51 @@ public class CognitionBoard : MonoBehaviour
     [SerializeField] private bool playRevealOnOpen = true;
     [SerializeField] private float revealDurationPerLine = 0.35f;
     [SerializeField] private float revealStagger = 0.10f;
-    [SerializeField] private float nodePopDuration = 0.22f; // NEW
-    [SerializeField] private float nodePopStagger = 0.05f; // NEW
+    [SerializeField] private float nodePopDuration = 0.22f;
+    [SerializeField] private float nodePopStagger = 0.05f;
 
     [Header("Navigation (UI map)")]
-    [SerializeField] private InputActionReference navigateAction;
+    [SerializeField] private InputActionReference navigateAction; // left stick / WASD
     [SerializeField] private InputActionReference submitAction;
+
+    [Header("Zoom Input")]
+    [SerializeField] private InputActionReference zoomAction; // scroll / triggers / etc.
+
+    // -------------------- FREELOOK --------------------
+    [Header("Freelook (right stick)")]
+    [SerializeField] private InputActionReference freeLookAction;      // right stick
+    [SerializeField] private float freeLookDeadZone = 0.25f;
+    [Tooltip("Invert the vertical axis for freelook panning.")]
+    [SerializeField] private bool invertFreelookY = false;
+
+    [Header("Freelook Speed Ramp")]
+    [Tooltip("Pixels per second at 1.0x zoom when you first push the stick.")]
+    [SerializeField] private float panSpeedInitial = 700f;
+    [Tooltip("How many seconds of held input to reach maximum speed.")]
+    [SerializeField] private float panSpeedRampDuration = 0.5f;
+    [Tooltip("Maximum pixels per second at 1.0x zoom while holding the stick.")]
+    [SerializeField] private float panSpeedMax = 2200f;
+
+    // -------------------- ZOOM --------------------
+    [Header("Zoom")]
+    [Tooltip("Base zoom step used to build a multiplicative factor. Positive deltas zoom in, negative zoom out.")]
+    [SerializeField] private float zoomStep = 0.1f;
+
+    [Header("Zoom Rate Ramp")]
+    [Tooltip("Multiplier on zoomStep when you first start holding the zoom input.")]
+    [SerializeField] private float zoomRateInitial = 1.0f;
+    [Tooltip("Seconds of continuous zoom input to reach the maximum zoom rate multiplier.")]
+    [SerializeField] private float zoomRateRampDuration = 0.5f;
+    [Tooltip("Maximum multiplier on zoomStep while holding zoom input.")]
+    [SerializeField] private float zoomRateMax = 5.0f;
+
+    // -------------------- Selection & Centering --------------------
+    [Header("Centering")]
+    [SerializeField] private bool keepSelectedCentered = true; // When selection changes, we center once.
 
     [Header("Navigation Tuning")]
     [SerializeField] private float navDeadZone = 0.5f;
-    [SerializeField] private float navFirstDelay = 0.25f;   // (kept for future)
+    [SerializeField] private float navFirstDelay = 0.25f;   // reserved
     [SerializeField] private float navRepeat = 0.15f;
     [SerializeField] private float dirConeDegrees = 70f;
     [SerializeField] private float minHopDistance = 30f;
@@ -36,43 +71,23 @@ public class CognitionBoard : MonoBehaviour
     [SerializeField] private bool centerOnSubmit = true;
 
     [Header("Viewport & Placement")]
-    [SerializeField] private RectTransform viewportRect;     // assign the visible viewport (parent mask/scroll area)
-    [SerializeField] private float minNodeSpacing = 140f;     // minimum distance between any two nodes (in content local space)
-    [SerializeField] private float relatedMaxDistance = 420f; // when a node has existing related nodes, spawn no further than this from their centroid
-    [SerializeField] private float spawnRadiusStart = 80f;    // starting search radius for new nodes
-    [SerializeField] private float spawnRadiusStep = 60f;    // how much we expand the ring each iteration
-    [SerializeField] private float spawnRadiusMax = 1200f;  // hard cap so we don’t spin forever
+    [SerializeField] private RectTransform viewportRect;     // visible area (optional, for centering)
+    [SerializeField] private float minNodeSpacing = 140f;    // minimum distance between nodes
+    [SerializeField] private float relatedMaxDistance = 420f;// cap distance from related centroid
+    [SerializeField] private float spawnRadiusStart = 80f;
+    [SerializeField] private float spawnRadiusStep = 60f;
+    [SerializeField] private float spawnRadiusMax = 1200f;
 
-    [Header("Zoom")]
-    [SerializeField, Range(0.25f, 3f)] private float minZoom = 0.5f;
-    [SerializeField, Range(0.25f, 3f)] private float maxZoom = 2.0f;
-    [SerializeField] private float zoomStep = 0.1f;
+    // BoardCamera reference (drives pan & zoom robustly)
+    [SerializeField] private BoardCamera boardCamera;
 
+    // Internals / accessors
+    public RectTransform ContentRect => contentRect ? contentRect : (RectTransform)transform;
     public float CurrentZoom => ContentRect ? ContentRect.localScale.x : 1f;
-
-    public void ZoomDelta(float delta)
-    {
-        if (!ContentRect) return;
-        float z = Mathf.Clamp(CurrentZoom + delta, minZoom, maxZoom);
-        ContentRect.localScale = Vector3.one * z;
-        SaveSystem.Instance?.SetBoardZoom(z);
-    }
-
-    public void SetZoom(float zoom)
-    {
-        if (!ContentRect) return;
-        float z = Mathf.Clamp(zoom, minZoom, maxZoom);
-        ContentRect.localScale = Vector3.one * z;
-        SaveSystem.Instance?.SetBoardZoom(z);
-    }
-
-
 
     private readonly List<(string, string)> pendingLineReveals = new(); // ORDERED
     private readonly HashSet<(string, string)> pendingLineSet = new();  // uniqueness
     private readonly List<string> pendingNodePops = new();              // ORDERED
-
-    public RectTransform ContentRect => contentRect ? contentRect : (RectTransform)transform;
 
     private readonly Dictionary<string, ClueNode> nodes = new();
     private readonly Dictionary<(string, string), ConnectionLineUI> lines = new();
@@ -88,6 +103,11 @@ public class CognitionBoard : MonoBehaviour
     private bool navHeld;
     private float cosCone;
 
+    // state
+    private bool inFreelook;
+    private float freelookHeldTime; // seconds held this press
+    private float zoomHeldTime;     // seconds held this press
+
     private void Awake()
     {
         gameObject.SetActive(false);
@@ -101,16 +121,34 @@ public class CognitionBoard : MonoBehaviour
     {
         try { navigateAction?.action?.Enable(); } catch { }
         try { submitAction?.action?.Enable(); } catch { }
+        try { zoomAction?.action?.Enable(); } catch { }
+        try { freeLookAction?.action?.Enable(); } catch { }
+
         navHeld = false; nextNavTime = 0f;
+        inFreelook = false;
+        freelookHeldTime = 0f;
+        zoomHeldTime = 0f;
+
         if (selectedNode == null) AutoSelectClosestToCenter();
+        else if (keepSelectedCentered && boardCamera && selectedNode)
+            boardCamera.FocusOn(selectedNode.Rect, immediate: false);
+
+        if (selectedNode) selectedNode.SetSelected(true);
     }
 
     private void OnDisable()
     {
-        if (selectedNode) selectedNode.Rect.localScale = Vector3.one;
+        if (selectedNode)
+        {
+            selectedNode.SetSelected(false);
+            selectedNode.Rect.localScale = Vector3.one;
+        }
         selectedNode = null;
         selectedGuid = null;
         navHeld = false; nextNavTime = 0f;
+
+        try { zoomAction?.action?.Disable(); } catch { }
+        try { freeLookAction?.action?.Disable(); } catch { }
     }
 
     private void EnsureLayers()
@@ -139,30 +177,35 @@ public class CognitionBoard : MonoBehaviour
         if (!data) { Debug.LogError("[CognitionBoard] AddNode null data"); return; }
         if (nodes.ContainsKey(data.Guid)) { BuildAutoLinksTouching(data.Guid); return; }
 
+        if (!nodesLayer) EnsureLayers();
+
         ClueNode node;
-        if (nodePrefab) node = Instantiate(nodePrefab, nodesLayer);
+        if (nodePrefab)
+        {
+            node = Instantiate(nodePrefab, nodesLayer);
+            if (node.Rect)
+            {
+                var rt = node.Rect;
+                rt.anchorMin = rt.anchorMax = rt.pivot = new Vector2(0.5f, 0.5f);
+                rt.localScale = Vector3.one;
+                rt.localRotation = Quaternion.identity;
+            }
+        }
         else
         {
             var go = new GameObject($"ClueNode_{data.clueName}", typeof(RectTransform), typeof(ClueNode));
             var rt = go.GetComponent<RectTransform>();
             rt.SetParent(nodesLayer, false);
+            rt.anchorMin = rt.anchorMax = rt.pivot = new Vector2(0.5f, 0.5f);
+            rt.localScale = Vector3.one;
+            rt.localRotation = Quaternion.identity;
             node = go.GetComponent<ClueNode>();
         }
 
         node.Initialize(this, data);
 
-        // --- NEW: initial placement ---
-        // If we already have a saved position, do nothing; SaveSystem restore will place it later.
-        // Otherwise, pick a sensible spot near either the related centroid or the view center,
-        // enforcing min spacing and (for related) a max distance constraint.
         bool hasSaved = false;
-        try
-        {
-            // If you have a SaveSystem query for node positions, call it here.
-            // Example pattern:
-            // hasSaved = SaveSystem.Instance?.TryGetNodePosition(data.Guid, out var _) == true;
-        }
-        catch { /* ignore */ }
+        try { /* hasSaved = SaveSystem.Instance?.TryGetNodePosition(data.Guid, out var _) == true; */ } catch { }
 
         if (!hasSaved && node.Rect && ContentRect)
         {
@@ -170,22 +213,17 @@ public class CognitionBoard : MonoBehaviour
 
             if (TryGetExistingRelatedCentroid(data, out var centroid))
             {
-                // Start near the related centroid, but cap distance
                 Vector2 start = ClampWithinRelatedMax(seed, centroid, relatedMaxDistance);
                 node.Rect.anchoredPosition = FindFreeSpot(start, minNodeSpacing);
             }
             else
             {
-                // No known neighbors — spawn near the current view center
                 node.Rect.anchoredPosition = FindFreeSpot(seed, minNodeSpacing);
             }
         }
 
-
-
         nodes.Add(data.Guid, node);
 
-        // Queue pop if board is closed (so it animates next open)
         if (!gameObject.activeInHierarchy && playRevealOnOpen)
         {
             node.Rect.localScale = Vector3.zero;
@@ -206,7 +244,6 @@ public class CognitionBoard : MonoBehaviour
         SaveSystem.Instance?.SetNodePosition(node.ClueGuid, node.Rect.anchoredPosition);
     }
 
-    // restore pan/zoom/positions (leave lines for reveal system)
     public void RestoreLayoutFromSave(bool rebuildLines = false)
     {
         var layout = SaveSystem.Instance?.GetBoardLayout();
@@ -221,9 +258,10 @@ public class CognitionBoard : MonoBehaviour
 
         if (rebuildLines) RebuildAllAutoLinks();
         AutoSelectClosestToCenter();
+
+        if (selectedNode) selectedNode.SetSelected(true);
     }
 
-    // Called by PauseMenuController right after opening the board
     public void NotifyBoardOpened()
     {
         if (!playRevealOnOpen) { pendingNodePops.Clear(); pendingLineReveals.Clear(); pendingLineSet.Clear(); return; }
@@ -234,18 +272,55 @@ public class CognitionBoard : MonoBehaviour
         StartCoroutine(PlayOpenRevealSequence());
     }
 
-    // ---------- Update (navigation) ----------
+    // ---------- Update (navigation + freelook + zoom) ----------
     private void Update()
     {
         if (!isActiveAndEnabled || nodes.Count == 0) return;
 
+        float dt = Time.unscaledDeltaTime;
+        float now = Time.unscaledTime;
+
+        // --- FREELook (right stick) ----------------------------------------
+        Vector2 look = Vector2.zero;
+        try { look = freeLookAction ? freeLookAction.action.ReadValue<Vector2>() : Vector2.zero; } catch { }
+        float lookMag = look.magnitude;
+
+        if (lookMag > freeLookDeadZone)
+        {
+            if (invertFreelookY) look.y = -look.y;
+
+            freelookHeldTime += dt;
+
+            float speedNow = ExpoRamp(panSpeedInitial, panSpeedMax, freelookHeldTime, panSpeedRampDuration);
+            Vector2 contentDelta = (look.normalized * speedNow * dt) / Mathf.Max(0.01f, CurrentZoom);
+
+            if (boardCamera) boardCamera.Nudge(contentDelta);
+            else
+            {
+                ContentRect.anchoredPosition += contentDelta;
+                SaveSystem.Instance?.SetBoardPan(ContentRect.anchoredPosition);
+            }
+
+            inFreelook = true;
+        }
+        else
+        {
+            freelookHeldTime = 0f; // reset ramp
+        }
+
+        // --- Directional selection (left stick / keys) ----------------------
         Vector2 dir = Vector2.zero;
         try { dir = navigateAction ? navigateAction.action.ReadValue<Vector2>() : Vector2.zero; } catch { }
         float mag = dir.magnitude;
-        float now = Time.unscaledTime;
 
         if (mag > navDeadZone)
         {
+            if (inFreelook)
+            {
+                inFreelook = false;
+                SelectClosestToViewCenterAndFocus();
+            }
+
             Vector2 norm = dir / mag;
             if (!navHeld || now >= nextNavTime || Vector2.Dot(norm, lastNavDir) < 0.65f)
             {
@@ -260,7 +335,73 @@ public class CognitionBoard : MonoBehaviour
         bool submitTriggered = false;
         try { submitTriggered = submitAction && submitAction.action.triggered; } catch { }
         if (submitTriggered && selectedNode && centerOnSubmit)
-            CenterOnNode(selectedNode);
+            CenterOnNodeImmediate(selectedNode);
+
+        // --- Zoom input (ramped; no centering during freelook) --------------
+        float zDelta = 0f;
+        try
+        {
+            if (zoomAction && zoomAction.action.enabled)
+            {
+                var controlType = zoomAction.action.expectedControlType;
+                if (controlType == "Vector2")
+                {
+                    Vector2 v = zoomAction.action.ReadValue<Vector2>();
+                    if (Mathf.Abs(v.y) > 0.01f) zDelta = Mathf.Sign(v.y); // direction only
+                }
+                else // float
+                {
+                    float f = zoomAction.action.ReadValue<float>();
+                    if (Mathf.Abs(f) > 0.01f) zDelta = Mathf.Sign(f); // direction only
+                }
+            }
+        }
+        catch { }
+
+        if (Mathf.Abs(zDelta) > 0f)
+        {
+            zoomHeldTime += dt;
+            ZoomDelta(zDelta);   // uses zoomHeldTime internally
+        }
+        else
+        {
+            zoomHeldTime = 0f;
+        }
+    }
+
+    // ---------- Zoom helpers ----------
+    public void ZoomDelta(float direction)
+    {
+        if (!ContentRect || boardCamera == null) return;
+
+        // Direction is +1 or -1. Build a multiplicative factor using our ramped rate.
+        float rateNow = ExpoRamp(zoomRateInitial, zoomRateMax, zoomHeldTime, zoomRateRampDuration);
+        float magnitude = Mathf.Max(0f, zoomStep * rateNow * Time.unscaledDeltaTime);
+
+        if (magnitude <= Mathf.Epsilon) return;
+
+        float factor = (direction > 0f) ? (1f + magnitude) : (1f / (1f + magnitude));
+
+        if (!inFreelook && keepSelectedCentered && selectedNode && viewportRect)
+        {
+            Vector2 pivotInViewport =
+                viewportRect.InverseTransformPoint(
+                    selectedNode.Rect.TransformPoint(selectedNode.Rect.rect.center));
+
+            boardCamera.ZoomAround(factor, pivotInViewport);
+            boardCamera.FocusOn(selectedNode.Rect, immediate: false); // keep perfectly centered
+        }
+        else
+        {
+            boardCamera.ZoomAroundCenter(factor);
+        }
+    }
+
+    public void SetZoom(float absoluteZoom)
+    {
+        if (!ContentRect) return;
+        ContentRect.localScale = Vector3.one * Mathf.Max(0.01f, absoluteZoom);
+        SaveSystem.Instance?.SetBoardZoom(ContentRect.localScale.x);
     }
 
     // ---------- Selection helpers ----------
@@ -276,22 +417,52 @@ public class CognitionBoard : MonoBehaviour
         }
         if (bestNode) SelectNodeInternal(bestNode);
     }
+
+    private void SelectClosestToViewCenterAndFocus()
+    {
+        AutoSelectClosestToCenter();
+        if (selectedNode)
+            boardCamera?.FocusOn(selectedNode.Rect, immediate: false);
+    }
+
     private void SelectNodeInternal(ClueNode node)
     {
         if (selectedNode == node) return;
-        if (selectedNode) selectedNode.Rect.localScale = Vector3.one;
-        selectedNode = node; selectedGuid = node ? node.ClueGuid : null;
+
         if (selectedNode)
         {
+            selectedNode.SetSelected(false);
+            selectedNode.Rect.localScale = Vector3.one;
+        }
+
+        selectedNode = node;
+        selectedGuid = node ? node.ClueGuid : null;
+
+        if (selectedNode)
+        {
+            selectedNode.SetSelected(true);
             selectedNode.Rect.localScale = Vector3.one * selectedScale;
             selectedNode.Rect.SetAsLastSibling();
         }
+
+        OnSelectedNodeChanged(selectedNode);
     }
+
+    void OnSelectedNodeChanged(ClueNode node)
+    {
+        boardCamera?.FocusOn(node?.Rect, immediate: false);
+    }
+
     private void ClearSelection()
     {
-        if (selectedNode) selectedNode.Rect.localScale = Vector3.one;
+        if (selectedNode)
+        {
+            selectedNode.SetSelected(false);
+            selectedNode.Rect.localScale = Vector3.one;
+        }
         selectedNode = null; selectedGuid = null;
     }
+
     private bool MoveSelectionInDirection(Vector2 dir)
     {
         if (!selectedNode) { AutoSelectClosestToCenter(); return selectedNode != null; }
@@ -313,14 +484,27 @@ public class CognitionBoard : MonoBehaviour
             if (score < bestScore) { bestScore = score; bestGuid = kv.Key; }
         }
         if (bestGuid != null && nodes.TryGetValue(bestGuid, out var bestNode))
-        { SelectNodeInternal(bestNode); return true; }
+        {
+            SelectNodeInternal(bestNode);
+            return true;
+        }
         return false;
     }
-    private void CenterOnNode(ClueNode node)
+
+    private void CenterOnNodeImmediate(ClueNode node)
     {
-        if (!node || !node.Rect || !ContentRect) return;
-        ContentRect.anchoredPosition = -node.Rect.anchoredPosition;
-        SaveSystem.Instance?.SetBoardPan(ContentRect.anchoredPosition);
+        if (!node || !node.Rect) return;
+
+        if (boardCamera)
+        {
+            boardCamera.FocusOn(node.Rect, immediate: true);
+        }
+        else
+        {
+            if (!ContentRect) return;
+            ContentRect.anchoredPosition = -node.Rect.anchoredPosition;
+            SaveSystem.Instance?.SetBoardPan(ContentRect.anchoredPosition);
+        }
     }
 
     // ---------- Auto-link logic ----------
@@ -393,9 +577,8 @@ public class CognitionBoard : MonoBehaviour
 
         var line = Instantiate(linePrefab, linesLayer);
         if (confirmed) line.Initialize(aAnchor, bAnchor, confirmedColor, confirmedWidth);
-        else line.Initialize(aAnchor, bAnchor, suggestedColor, suggestedWidth);
+        else           line.Initialize(aAnchor, bAnchor, suggestedColor, suggestedWidth);
 
-        // Decide which end to grow from based on discovery order (older -> newer)
         int ia = SaveSystem.Instance ? SaveSystem.Instance.GetDiscoveryIndex(key.Item1) : int.MaxValue;
         int ib = SaveSystem.Instance ? SaveSystem.Instance.GetDiscoveryIndex(key.Item2) : int.MaxValue;
         bool fromA = ia <= ib;
@@ -405,7 +588,7 @@ public class CognitionBoard : MonoBehaviour
         {
             line.SetReveal(0f);
             if (pendingLineSet.Add(key))
-                pendingLineReveals.Add(key); // keep append order
+                pendingLineReveals.Add(key);
         }
         else
         {
@@ -415,7 +598,6 @@ public class CognitionBoard : MonoBehaviour
         lines[key] = line;
     }
 
-    // Convenience wrappers (if other code wants explicit calls)
     public void AddSuggestedConnectionsFor(string guid) => BuildAutoLinksTouching(guid);
     public void BuildAllAutoConnections() => RebuildAllAutoLinks();
     public void RestoreConnectionsFromSave() => RebuildAllAutoLinks();
@@ -423,7 +605,6 @@ public class CognitionBoard : MonoBehaviour
     // ---------- Reveal sequence on open ----------
     private System.Collections.IEnumerator PlayOpenRevealSequence()
     {
-        // 1) Pop nodes in discovery order
         var order = SaveSystem.Instance ? SaveSystem.Instance.GetDiscoveryOrder() : null;
         if (order != null && order.Count > 0 && pendingNodePops.Count > 0)
         {
@@ -433,7 +614,6 @@ public class CognitionBoard : MonoBehaviour
                 if (!pendingNodePops.Contains(guid)) continue;
                 if (!nodes.TryGetValue(guid, out var node) || !node || !node.Rect) continue;
 
-                // Animate scale 0 -> 1
                 float t = 0f;
                 while (t < 1f)
                 {
@@ -444,17 +624,14 @@ public class CognitionBoard : MonoBehaviour
                 }
                 node.Rect.localScale = Vector3.one;
 
-                // small stagger
                 float end = Time.unscaledTime + nodePopStagger;
                 while (Time.unscaledTime < end) yield return null;
             }
         }
         pendingNodePops.Clear();
 
-        // 2) Reveal lines, oldest->newest (by newer endpoint’s discovery index)
         if (pendingLineReveals.Count > 0)
         {
-            // sort by max(discoveryIndexA, discoveryIndexB)
             pendingLineReveals.Sort((p, q) =>
             {
                 int pa = SaveSystem.Instance ? SaveSystem.Instance.GetDiscoveryIndex(p.Item1) : int.MaxValue;
@@ -491,38 +668,27 @@ public class CognitionBoard : MonoBehaviour
 
     public void ClearAll()
     {
-        // Destroy nodes
         foreach (var kv in nodes)
             if (kv.Value) Destroy(kv.Value.gameObject);
         nodes.Clear();
 
-        // Destroy lines
         foreach (var kv in lines)
             if (kv.Value) Destroy(kv.Value.gameObject);
         lines.Clear();
 
-        // Drop any queued reveals
-        // (rename or clear whatever collections you use)
-        // e.g.:
-        // pendingLineReveals.Clear();
-        // pendingLineSet.Clear();
-        // pendingNodePops.Clear();
-
-        // Reset pan/zoom
         if (ContentRect)
         {
             ContentRect.localScale = Vector3.one;
             ContentRect.anchoredPosition = Vector2.zero;
         }
 
-        // Persist the reset layout
         SaveSystem.Instance?.SetBoardZoom(1f);
         SaveSystem.Instance?.SetBoardPan(Vector2.zero);
     }
 
+    // ---------- Placement helpers ----------
     private Vector2 GetViewCenterLocal()
     {
-        // If we know the viewport, convert its center to content-local space.
         if (viewportRect && ContentRect && viewportRect.gameObject.activeInHierarchy)
         {
             var vpWorld = viewportRect.TransformPoint(viewportRect.rect.center);
@@ -531,8 +697,6 @@ public class CognitionBoard : MonoBehaviour
                 ContentRect, RectTransformUtility.WorldToScreenPoint(null, vpWorld), null, out local);
             return local;
         }
-
-        // Fallback: content anchoredPosition is the pan; view center ≈ -pan
         return -ContentRect.anchoredPosition;
     }
 
@@ -551,7 +715,6 @@ public class CognitionBoard : MonoBehaviour
 
     private Vector2 FindFreeSpot(Vector2 seed, float minDist)
     {
-        // Try rings around seed; sample a few angles per ring.
         float r = Mathf.Max(0f, spawnRadiusStart);
         var rand = new System.Random((int)(Time.realtimeSinceStartup * 1000f));
 
@@ -560,7 +723,6 @@ public class CognitionBoard : MonoBehaviour
             int samples = Mathf.Clamp(Mathf.CeilToInt(2f * Mathf.PI * r / Mathf.Max(1f, minDist)), 8, 48);
             for (int i = 0; i < samples; i++)
             {
-                // jitter the angle a bit so identical radii don't pick identical points
                 float t = (i + (float)rand.NextDouble() * 0.35f) / samples;
                 float ang = t * Mathf.PI * 2f;
                 var p = seed + new Vector2(Mathf.Cos(ang), Mathf.Sin(ang)) * r;
@@ -568,8 +730,6 @@ public class CognitionBoard : MonoBehaviour
             }
             r += Mathf.Max(8f, spawnRadiusStep);
         }
-
-        // If we didn’t find anything, just drop at seed.
         return seed;
     }
 
@@ -601,5 +761,15 @@ public class CognitionBoard : MonoBehaviour
         return centroid + delta / d * maxDist;
     }
 
+    // ---------- math ----------
+    private static float ExpoRamp(float start, float max, float heldTime, float rampTime)
+    {
+        if (heldTime <= 0f) return Mathf.Max(0f, start);
+        if (rampTime <= 0f) return Mathf.Max(start, max);
 
+        float s = Mathf.Max(0.0001f, start);
+        float ratio = Mathf.Max(0.0001f, max / s);
+        float u = Mathf.Clamp01(heldTime / rampTime);
+        return s * Mathf.Pow(ratio, u); // exact start->max in rampTime
+    }
 }

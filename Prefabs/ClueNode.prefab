@@ -58,7 +58,7 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   m_Material: {fileID: 0}
-  m_Color: {r: 1, g: 1, b: 1, a: 1}
+  m_Color: {r: 1, g: 1, b: 1, a: 0}
   m_RaycastTarget: 1
   m_RaycastPadding: {x: 0, y: 0, z: 0, w: 0}
   m_Maskable: 1
@@ -86,6 +86,8 @@ GameObject:
   - component: {fileID: 3151524033443598865}
   - component: {fileID: 6361625507613584903}
   - component: {fileID: 6311808877165907907}
+  - component: {fileID: 8425072512833419600}
+  - component: {fileID: 3044751986590468735}
   m_Layer: 5
   m_Name: Ring
   m_TagString: Untagged
@@ -150,6 +152,36 @@ MonoBehaviour:
   m_FillOrigin: 0
   m_UseSpriteMesh: 0
   m_PixelsPerUnitMultiplier: 1
+--- !u!114 &8425072512833419600
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 6396902356146451667}
+  m_Enabled: 0
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: e19747de3f5aca642ab2be37e372fb86, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  m_EffectColor: {r: 1, g: 0.85978806, b: 0, a: 0}
+  m_EffectDistance: {x: 1, y: -1}
+  m_UseGraphicAlpha: 0
+--- !u!114 &3044751986590468735
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 6396902356146451667}
+  m_Enabled: 0
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: cfabb0440166ab443bba8876756fdfa9, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  m_EffectColor: {r: 1, g: 0, b: 0, a: 0}
+  m_EffectDistance: {x: 1, y: -1}
+  m_UseGraphicAlpha: 0
 --- !u!1 &7871461220840384752
 GameObject:
   m_ObjectHideFlags: 0
@@ -217,7 +249,7 @@ MonoBehaviour:
   m_OnCullStateChanged:
     m_PersistentCalls:
       m_Calls: []
-  m_Sprite: {fileID: 21300000, guid: a4948d01fd5437844a3428ef25924883, type: 3}
+  m_Sprite: {fileID: 0}
   m_Type: 0
   m_PreserveAspect: 0
   m_FillCenter: 1
@@ -292,3 +324,20 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   style: 0
   showTitle: 0
+  showRingOnlyWhenSelected: 1
+  ringSelectedColor: {r: 0.13521993, g: 0.55764735, b: 1, a: 1}
+  ringUnselectedColor: {r: 0.72955966, g: 0, b: 0, a: 0}
+  useCategoryColorForUnselected: 0
+  ringScale: 1.12
+  ringExtraPixels: -0.02
+  outlineOnSelected: {fileID: 8425072512833419600}
+  enableOutlineOnSelected: 0
+  outlineSelectedColor: {r: 1, g: 0.7149937, b: 0, a: 1}
+  outlineSelectedDistance: {x: 3, y: -3}
+  glowOnSelected: {fileID: 8425072512833419600}
+  enableGlowOnSelected: 0
+  glowSelectedColor: {r: 1, g: 1, b: 1, a: 0}
+  glowSelectedDistance: {x: 0, y: 0}
+  baseShadowEnabled: 0
+  baseShadow: {fileID: 8425072512833419600}
+  ringImage: {fileID: 6311808877165907907}
