@@ -70,6 +70,40 @@ public class BoardCamera : MonoBehaviour
         else           { targetPos = desiredWorld; hasTarget = true; }
     }
 
+    // NOTE [ADDED]: instant snap helper used before cutscene begins to kill any smoothing.
+    public void SnapTo(RectTransform node)
+    {
+        CancelMotion();            // ensure no residual smoothing
+        FocusOn(node, true);       // same math as immediate focus
+    }
+
+    // NOTE [ADDED]: stop any in-flight smoothing (LateUpdate stops driving).
+    public void CancelMotion()
+    {
+        if (!content) return;
+        targetPos = content.position;
+        targetScale = content.localScale.x;
+        hasTarget = false;
+    }
+
+    // Focus using any world point (e.g., line tip).
+    public void FocusOnWorldPoint(Vector3 worldPoint, bool immediate = false)
+    {
+        if (!content || !viewport) return;
+
+        Vector2 pointInViewport = (Vector2)viewport.InverseTransformPoint(worldPoint);
+        Vector2 viewportCenter  = viewport.rect.center;
+
+        Vector2 contentPosInViewport = (Vector2)viewport.InverseTransformPoint(content.position);
+        Vector2 desiredContentPosInViewport = contentPosInViewport + (viewportCenter - pointInViewport);
+        Vector3 desiredWorld = viewport.TransformPoint(desiredContentPosInViewport);
+
+        if (clampToContentBounds) desiredWorld = ClampContentWorld(desiredWorld, content.localScale.x);
+
+        if (immediate) { content.position = desiredWorld; targetPos = desiredWorld; hasTarget = true; }
+        else           { targetPos = desiredWorld; hasTarget = true; }
+    }
+
     public void ZoomAround(float factor, Vector2 focalPointViewportLocal)
     {
         if (!content || !viewport) return;

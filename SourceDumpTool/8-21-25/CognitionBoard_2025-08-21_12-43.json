@@ -1,0 +1,303 @@
+{
+    "scannedFolder": "Assets/Scripts/UI Scripts/Cognition Board/CognitionBoard.cs",
+    "generatedAt": "2025-08-21T10:43:25.4147863Z",
+    "mode": "SingleFile (Any)",
+    "scripts": [
+        {
+            "kind": 0,
+            "className": "CognitionBoard",
+            "namespace": "",
+            "fullName": "CognitionBoard",
+            "filePath": "Assets/Scripts/UI Scripts/Cognition Board/CognitionBoard.cs",
+            "guid": "20d9c282248487240ae5649a4ba6941a",
+            "source": "using UnityEngine;\r\nusing System.Collections.Generic;\r\nusing UnityEngine.InputSystem;\r\n\r\npublic class CognitionBoard : MonoBehaviour\r\n{\r\n    [Header(\"UI\")]\r\n    [SerializeField] private RectTransform contentRect;\r\n    [SerializeField] private ClueNode nodePrefab;\r\n    [SerializeField] private ConnectionLineUI linePrefab;\r\n\r\n    [Header(\"Clue Info Panel\")]\r\n    [Tooltip(\"Optional. If assigned, shows clue name/description when in hard focus.\")]\r\n    [SerializeField] private ClueInfoPanel infoPanel;\r\n    [Tooltip(\"If true, the info panel is only visible when not in Freelook.\")]\r\n    [SerializeField] private bool showInfoOnlyWhenHardFocus = true;\r\n\r\n    [Header(\"Line Style\")]\r\n    [SerializeField] private Color suggestedColor = new(0.90f, 0.25f, 0.25f, 1f);\r\n    [SerializeField] private float suggestedWidth = 4f;\r\n    [SerializeField] private Color confirmedColor = new(0.20f, 0.90f, 0.35f, 1f);\r\n    [SerializeField] private float confirmedWidth = 5.5f;\r\n\r\n    [Header(\"Cutscene\")]\r\n    [SerializeField] private bool autoPlayDiscoveryCutsceneOnOpen = true;\r\n    [SerializeField] private float defaultZoom = 1.0f;      // Board's resting zoom\r\n    [SerializeField] private float cutsceneZoom = 2.2f;     // How close we zoom during cutscene\r\n    [SerializeField] private float cutscenePanFollowSpeed = 12f; // Camera follow speed when tracking line tips\r\n    [SerializeField] private InputActionReference interactAction; // Which input advances cutscene (can reuse submitAction)\r\n\r\n\r\n    [Header(\"Reveal (play on open)\")]\r\n    [SerializeField] private bool playRevealOnOpen = true;\r\n    [SerializeField] private float revealDurationPerLine = 0.35f;\r\n    [SerializeField] private float revealStagger = 0.10f;\r\n    [SerializeField] private float nodePopDuration = 0.22f;\r\n    [SerializeField] private float nodePopStagger = 0.05f;\r\n\r\n    [Header(\"Navigation (UI map)\")]\r\n    [SerializeField] private InputActionReference navigateAction; // left stick / WASD\r\n    [SerializeField] private InputActionReference submitAction;\r\n\r\n    [Header(\"Zoom Input\")]\r\n    [SerializeField] private InputActionReference zoomAction; // scroll / triggers / etc.\r\n\r\n    // -------------------- FREELOOK --------------------\r\n    [Header(\"Freelook (right stick)\")]\r\n    [SerializeField] private InputActionReference freeLookAction;      // right stick\r\n    [SerializeField] private float freeLookDeadZone = 0.25f;\r\n    [Tooltip(\"Invert the vertical axis for freelook panning.\")]\r\n    [SerializeField] private bool invertFreelookY = false;\r\n\r\n    [Header(\"Freelook Speed Ramp\")]\r\n    [Tooltip(\"Pixels per second at 1.0x zoom when you first push the stick.\")]\r\n    [SerializeField] private float panSpeedInitial = 700f;\r\n    [Tooltip(\"How many seconds of held input to reach maximum speed.\")]\r\n    [SerializeField] private float panSpeedRampDuration = 0.5f;\r\n    [Tooltip(\"Maximum pixels per second at 1.0x zoom while holding the stick.\")]\r\n    [SerializeField] private float panSpeedMax = 2200f;\r\n\r\n    // -------------------- ZOOM --------------------\r\n    [Header(\"Zoom\")]\r\n    [Tooltip(\"Base zoom step used to build a multiplicative factor. Positive deltas zoom in, negative zoom out.\")]\r\n    [SerializeField] private float zoomStep = 0.1f;\r\n\r\n    [Header(\"Zoom Rate Ramp\")]\r\n    [Tooltip(\"Multiplier on zoomStep when you first start holding the zoom input.\")]\r\n    [SerializeField] private float zoomRateInitial = 1.0f;\r\n    [Tooltip(\"Seconds of continuous zoom input to reach the maximum zoom rate multiplier.\")]\r\n    [SerializeField] private float zoomRateRampDuration = 0.5f;\r\n    [Tooltip(\"Maximum multiplier on zoomStep while holding zoom input.\")]\r\n    [SerializeField] private float zoomRateMax = 5.0f;\r\n\r\n    // -------------------- Selection & Centering --------------------\r\n    [Header(\"Centering\")]\r\n    [SerializeField] private bool keepSelectedCentered = true; // When selection changes, we center once.\r\n\r\n    [Header(\"Navigation Tuning\")]\r\n    [SerializeField] private float navDeadZone = 0.5f;\r\n    [SerializeField] private float navFirstDelay = 0.25f;   // reserved\r\n    [SerializeField] private float navRepeat = 0.15f;\r\n    [SerializeField] private float dirConeDegrees = 70f;\r\n    [SerializeField] private float minHopDistance = 30f;\r\n    [SerializeField] private float selectedScale = 1.08f;\r\n    [SerializeField] private bool centerOnSubmit = true;\r\n\r\n    [Header(\"Viewport & Placement\")]\r\n    [SerializeField] private RectTransform viewportRect;     // visible area (optional, for centering)\r\n    [SerializeField] private float minNodeSpacing = 140f;    // minimum distance between nodes\r\n    [SerializeField] private float relatedMaxDistance = 420f;// cap distance from related centroid\r\n    [SerializeField] private float spawnRadiusStart = 80f;\r\n    [SerializeField] private float spawnRadiusStep = 60f;\r\n    [SerializeField] private float spawnRadiusMax = 1200f;\r\n\r\n    // BoardCamera reference (drives pan & zoom robustly)\r\n    [SerializeField] private BoardCamera boardCamera;\r\n\r\n    \r\n\r\n\r\n\r\n    // Internals / accessors\r\n    public RectTransform ContentRect => contentRect ? contentRect : (RectTransform)transform;\r\n    public float CurrentZoom => ContentRect ? ContentRect.localScale.x : 1f;\r\n\r\n    private readonly List<(string, string)> pendingLineReveals = new();\r\n    private readonly HashSet<(string, string)> pendingLineSet = new();\r\n    private readonly List<string> pendingNodePops = new();\r\n\r\n    private readonly Dictionary<string, ClueNode> nodes = new();\r\n    private readonly Dictionary<(string, string), ConnectionLineUI> lines = new();\r\n\r\n    private RectTransform linesLayer;\r\n    private RectTransform nodesLayer;\r\n\r\n    // selection\r\n    private string selectedGuid;\r\n    private ClueNode selectedNode;\r\n    private Vector2 lastNavDir;\r\n    private float nextNavTime;\r\n    private bool navHeld;\r\n    private float cosCone;\r\n\r\n    // state\r\n    private bool inFreelook;\r\n    private float freelookHeldTime; // seconds held this press\r\n    private float zoomHeldTime;     // seconds held this press\r\n\r\n    private Coroutine discoveryRoutine;\r\n\r\n    private void Awake()\r\n    {\r\n        gameObject.SetActive(false);\r\n        if (!contentRect) contentRect = GetComponent<RectTransform>();\r\n        if (!contentRect) Debug.LogError(\"[CognitionBoard] No RectTransform for content.\", this);\r\n        EnsureLayers();\r\n        cosCone = Mathf.Cos(dirConeDegrees * Mathf.Deg2Rad);\r\n    }\r\n\r\n    private void OnEnable()\r\n    {\r\n        try { navigateAction?.action?.Enable(); } catch { }\r\n        try { submitAction?.action?.Enable(); } catch { }\r\n        try { zoomAction?.action?.Enable(); } catch { }\r\n        try { freeLookAction?.action?.Enable(); } catch { }\r\n\r\n        navHeld = false; nextNavTime = 0f;\r\n        inFreelook = false;\r\n        freelookHeldTime = 0f;\r\n        zoomHeldTime = 0f;\r\n\r\n        if (selectedNode == null) AutoSelectClosestToCenter();\r\n        else if (keepSelectedCentered && boardCamera && selectedNode)\r\n            boardCamera.FocusOn(selectedNode.Rect, immediate: false);\r\n\r\n        if (selectedNode) selectedNode.SetSelected(true);\r\n\r\n        // Show info panel immediately if we have a selection and we’re not in freelook\r\n        if (infoPanel && selectedNode && (!showInfoOnlyWhenHardFocus || !inFreelook))\r\n            infoPanel.ShowFor(selectedNode.Data, immediate: true);\r\n\r\n        if (autoPlayDiscoveryCutsceneOnOpen && pendingNodePops.Count > 0)\r\n        {\r\n            if (discoveryRoutine != null) StopCoroutine(discoveryRoutine);\r\n            discoveryRoutine = StartCoroutine(PlayDiscoveryCutscene());\r\n        }\r\n    }\r\n\r\n    private void OnDisable()\r\n    {\r\n        if (selectedNode)\r\n        {\r\n            selectedNode.SetSelected(false);\r\n            selectedNode.Rect.localScale = Vector3.one;\r\n        }\r\n        selectedNode = null;\r\n        selectedGuid = null;\r\n        navHeld = false; nextNavTime = 0f;\r\n\r\n        try { zoomAction?.action?.Disable(); } catch { }\r\n        try { freeLookAction?.action?.Disable(); } catch { }\r\n\r\n        infoPanel?.Hide(true);\r\n    }\r\n\r\n    private void EnsureLayers()\r\n    {\r\n        linesLayer = FindOrCreateLayer(\"Lines\", 0);\r\n        nodesLayer = FindOrCreateLayer(\"Nodes\", 1);\r\n    }\r\n    private RectTransform FindOrCreateLayer(string name, int siblingIndex)\r\n    {\r\n        var t = ContentRect.Find(name) as RectTransform;\r\n        if (!t)\r\n        {\r\n            var go = new GameObject(name, typeof(RectTransform));\r\n            t = go.GetComponent<RectTransform>();\r\n            t.SetParent(ContentRect, false);\r\n            t.anchorMin = Vector2.zero; t.anchorMax = Vector2.one;\r\n            t.offsetMin = Vector2.zero; t.offsetMax = Vector2.zero;\r\n        }\r\n        t.SetSiblingIndex(siblingIndex);\r\n        return t;\r\n    }\r\n\r\n    // ---------- Public API ----------\r\n    public void AddNode(ClueData data)\r\n    {\r\n        if (!data) { Debug.LogError(\"[CognitionBoard] AddNode null data\"); return; }\r\n        if (nodes.ContainsKey(data.Guid)) { BuildAutoLinksTouching(data.Guid); return; }\r\n\r\n        if (!nodesLayer) EnsureLayers();\r\n\r\n        ClueNode node;\r\n        if (nodePrefab)\r\n        {\r\n            node = Instantiate(nodePrefab, nodesLayer);\r\n            if (node.Rect)\r\n            {\r\n                var rt = node.Rect;\r\n                rt.anchorMin = rt.anchorMax = rt.pivot = new Vector2(0.5f, 0.5f);\r\n                rt.localScale = Vector3.one;\r\n                rt.localRotation = Quaternion.identity;\r\n            }\r\n        }\r\n        else\r\n        {\r\n            var go = new GameObject($\"ClueNode_{data.clueName}\", typeof(RectTransform), typeof(ClueNode));\r\n            var rt = go.GetComponent<RectTransform>();\r\n            rt.SetParent(nodesLayer, false);\r\n            rt.anchorMin = rt.anchorMax = rt.pivot = new Vector2(0.5f, 0.5f);\r\n            rt.localScale = Vector3.one;\r\n            rt.localRotation = Quaternion.identity;\r\n            node = go.GetComponent<ClueNode>();\r\n        }\r\n\r\n        node.Initialize(this, data);\r\n\r\n        bool hasSaved = false;\r\n        try { /* hasSaved = SaveSystem.Instance?.TryGetNodePosition(data.Guid, out var _) == true; */ } catch { }\r\n\r\n        if (!hasSaved && node.Rect && ContentRect)\r\n        {\r\n            Vector2 seed = GetViewCenterLocal();\r\n\r\n            if (TryGetExistingRelatedCentroid(data, out var centroid))\r\n            {\r\n                Vector2 start = ClampWithinRelatedMax(seed, centroid, relatedMaxDistance);\r\n                node.Rect.anchoredPosition = FindFreeSpot(start, minNodeSpacing);\r\n            }\r\n            else\r\n            {\r\n                node.Rect.anchoredPosition = FindFreeSpot(seed, minNodeSpacing);\r\n            }\r\n        }\r\n\r\n        nodes.Add(data.Guid, node);\r\n\r\n        if (!gameObject.activeInHierarchy && playRevealOnOpen)\r\n        {\r\n            node.Rect.localScale = Vector3.zero;\r\n            if (!pendingNodePops.Contains(data.Guid))\r\n                pendingNodePops.Add(data.Guid);\r\n        }\r\n\r\n        BuildAutoLinksTouching(data.Guid);\r\n\r\n        if (isActiveAndEnabled && selectedNode == null)\r\n            SelectNodeInternal(node);\r\n    }\r\n\r\n    public void BeginNodeDrag(ClueNode _) { }\r\n    public void OnNodeMoved(ClueNode _) { }\r\n    public void EndNodeDrag(ClueNode node)\r\n    {\r\n        SaveSystem.Instance?.SetNodePosition(node.ClueGuid, node.Rect.anchoredPosition);\r\n    }\r\n\r\n    public void RestoreLayoutFromSave(bool rebuildLines = false)\r\n    {\r\n        var layout = SaveSystem.Instance?.GetBoardLayout();\r\n        if (layout == null) return;\r\n\r\n        ContentRect.localScale = Vector3.one * layout.zoom;\r\n        ContentRect.anchoredPosition = layout.pan;\r\n\r\n        foreach (var kvp in layout.nodePositions)\r\n            if (nodes.TryGetValue(kvp.Key, out var node))\r\n                node.Rect.anchoredPosition = kvp.Value;\r\n\r\n        if (rebuildLines) RebuildAllAutoLinks();\r\n        AutoSelectClosestToCenter();\r\n\r\n        if (selectedNode) selectedNode.SetSelected(true);\r\n\r\n        if (infoPanel && selectedNode && (!showInfoOnlyWhenHardFocus || !inFreelook))\r\n            infoPanel.ShowFor(selectedNode.Data, immediate: true);\r\n    }\r\n\r\n    public void NotifyBoardOpened()\r\n    {\r\n        if (!playRevealOnOpen) { pendingNodePops.Clear(); pendingLineReveals.Clear(); pendingLineSet.Clear(); return; }\r\n        if (!gameObject.activeInHierarchy) return;\r\n        if (pendingNodePops.Count == 0 && pendingLineReveals.Count == 0) return;\r\n\r\n        StopAllCoroutines();\r\n        StartCoroutine(PlayOpenRevealSequence());\r\n    }\r\n\r\n    // ---------- Update (navigation + freelook + zoom) ----------\r\n    private void Update()\r\n    {\r\n        if (!isActiveAndEnabled || nodes.Count == 0) return;\r\n\r\n        float dt = Time.unscaledDeltaTime;\r\n        float now = Time.unscaledTime;\r\n\r\n        // --- FREELook (right stick) ----------------------------------------\r\n        Vector2 look = Vector2.zero;\r\n        try { look = freeLookAction ? freeLookAction.action.ReadValue<Vector2>() : Vector2.zero; } catch { }\r\n        float lookMag = look.magnitude;\r\n\r\n        if (lookMag > freeLookDeadZone)\r\n        {\r\n            if (invertFreelookY) look.y = -look.y;\r\n\r\n            // First frame entering freelook? Hide info panel if it's hard-focus only.\r\n            if (!inFreelook)\r\n            {\r\n                inFreelook = true;\r\n                if (infoPanel && showInfoOnlyWhenHardFocus) infoPanel.Hide(false);\r\n            }\r\n\r\n            freelookHeldTime += dt;\r\n\r\n            float speedNow = ExpoRamp(panSpeedInitial, panSpeedMax, freelookHeldTime, panSpeedRampDuration);\r\n            Vector2 contentDelta = (look.normalized * speedNow * dt) / Mathf.Max(0.01f, CurrentZoom);\r\n\r\n            if (boardCamera) boardCamera.Nudge(contentDelta);\r\n            else\r\n            {\r\n                ContentRect.anchoredPosition += contentDelta;\r\n                SaveSystem.Instance?.SetBoardPan(ContentRect.anchoredPosition);\r\n            }\r\n        }\r\n        else\r\n        {\r\n            freelookHeldTime = 0f; // reset ramp (we remain in freelook until left stick)\r\n        }\r\n\r\n        // --- Directional selection (left stick / keys) ----------------------\r\n        Vector2 dir = Vector2.zero;\r\n        try { dir = navigateAction ? navigateAction.action.ReadValue<Vector2>() : Vector2.zero; } catch { }\r\n        float mag = dir.magnitude;\r\n\r\n        if (mag > navDeadZone)\r\n        {\r\n            // Leaving freelook via left stick: pick node near center, refocus, show info.\r\n            if (inFreelook)\r\n            {\r\n                inFreelook = false;\r\n                SelectClosestToViewCenterAndFocus();\r\n                if (infoPanel && selectedNode && showInfoOnlyWhenHardFocus)\r\n                    infoPanel.ShowFor(selectedNode.Data, immediate: false);\r\n            }\r\n\r\n            Vector2 norm = dir / mag;\r\n            if (!navHeld || now >= nextNavTime || Vector2.Dot(norm, lastNavDir) < 0.65f)\r\n            {\r\n                lastNavDir = norm;\r\n                bool moved = MoveSelectionInDirection(norm);\r\n                navHeld = true;\r\n                nextNavTime = now + (moved ? navRepeat : navRepeat * 0.5f);\r\n            }\r\n        }\r\n        else { navHeld = false; nextNavTime = 0f; }\r\n\r\n        bool submitTriggered = false;\r\n        try { submitTriggered = submitAction && submitAction.action.triggered; } catch { }\r\n        if (submitTriggered && selectedNode && centerOnSubmit)\r\n            CenterOnNodeImmediate(selectedNode);\r\n\r\n        // --- Zoom input (ramped; no centering during freelook) --------------\r\n        float zDelta = 0f;\r\n        try\r\n        {\r\n            if (zoomAction && zoomAction.action.enabled)\r\n            {\r\n                var controlType = zoomAction.action.expectedControlType;\r\n                if (controlType == \"Vector2\")\r\n                {\r\n                    Vector2 v = zoomAction.action.ReadValue<Vector2>();\r\n                    if (Mathf.Abs(v.y) > 0.01f) zDelta = Mathf.Sign(v.y); // direction only\r\n                }\r\n                else // float\r\n                {\r\n                    float f = zoomAction.action.ReadValue<float>();\r\n                    if (Mathf.Abs(f) > 0.01f) zDelta = Mathf.Sign(f); // direction only\r\n                }\r\n            }\r\n        }\r\n        catch { }\r\n\r\n        if (Mathf.Abs(zDelta) > 0f)\r\n        {\r\n            zoomHeldTime += dt;\r\n            ZoomDelta(zDelta);   // uses zoomHeldTime internally\r\n        }\r\n        else\r\n        {\r\n            zoomHeldTime = 0f;\r\n        }\r\n    }\r\n\r\n    // ---------- Zoom helpers ----------\r\n    public void ZoomDelta(float direction)\r\n    {\r\n        if (!ContentRect || boardCamera == null) return;\r\n\r\n        float rateNow = ExpoRamp(zoomRateInitial, zoomRateMax, zoomHeldTime, zoomRateRampDuration);\r\n        float magnitude = Mathf.Max(0f, zoomStep * rateNow * Time.unscaledDeltaTime);\r\n        if (magnitude <= Mathf.Epsilon) return;\r\n\r\n        float factor = (direction > 0f) ? (1f + magnitude) : (1f / (1f + magnitude));\r\n\r\n        if (!inFreelook && keepSelectedCentered && selectedNode && viewportRect)\r\n        {\r\n            Vector2 pivotInViewport =\r\n                viewportRect.InverseTransformPoint(\r\n                    selectedNode.Rect.TransformPoint(selectedNode.Rect.rect.center));\r\n\r\n            boardCamera.ZoomAround(factor, pivotInViewport);\r\n            boardCamera.FocusOn(selectedNode.Rect, immediate: false);\r\n        }\r\n        else\r\n        {\r\n            boardCamera.ZoomAroundCenter(factor);\r\n        }\r\n    }\r\n\r\n    public void SetZoom(float absoluteZoom)\r\n    {\r\n        if (!ContentRect) return;\r\n        ContentRect.localScale = Vector3.one * Mathf.Max(0.01f, absoluteZoom);\r\n        SaveSystem.Instance?.SetBoardZoom(ContentRect.localScale.x);\r\n    }\r\n\r\n    // ---------- Selection helpers ----------\r\n    private void AutoSelectClosestToCenter()\r\n    {\r\n        if (nodes.Count == 0) { ClearSelection(); return; }\r\n        float best = float.MaxValue; ClueNode bestNode = null;\r\n        foreach (var kv in nodes)\r\n        {\r\n            var n = kv.Value; if (!n || !n.Rect) continue;\r\n            float d2 = n.Rect.anchoredPosition.sqrMagnitude;\r\n            if (d2 < best) { best = d2; bestNode = n; }\r\n        }\r\n        if (bestNode) SelectNodeInternal(bestNode);\r\n    }\r\n\r\n    private void SelectClosestToViewCenterAndFocus()\r\n    {\r\n        AutoSelectClosestToCenter();\r\n        if (selectedNode)\r\n            boardCamera?.FocusOn(selectedNode.Rect, immediate: false);\r\n    }\r\n\r\n    private void SelectNodeInternal(ClueNode node)\r\n    {\r\n        if (selectedNode == node) return;\r\n\r\n        if (selectedNode)\r\n        {\r\n            selectedNode.SetSelected(false);\r\n            selectedNode.Rect.localScale = Vector3.one;\r\n        }\r\n\r\n        selectedNode = node;\r\n        selectedGuid = node ? node.ClueGuid : null;\r\n\r\n        if (selectedNode)\r\n        {\r\n            selectedNode.SetSelected(true);\r\n            selectedNode.Rect.localScale = Vector3.one * selectedScale;\r\n            selectedNode.Rect.SetAsLastSibling();\r\n        }\r\n\r\n        OnSelectedNodeChanged(selectedNode);\r\n\r\n        // Update info panel if we’re not in freelook (or if hard-focus-only is off)\r\n        if (infoPanel && selectedNode && (!showInfoOnlyWhenHardFocus || !inFreelook))\r\n            infoPanel.ShowFor(selectedNode.Data, immediate: false);\r\n    }\r\n\r\n    void OnSelectedNodeChanged(ClueNode node)\r\n    {\r\n        boardCamera?.FocusOn(node?.Rect, immediate: false);\r\n    }\r\n\r\n    private void ClearSelection()\r\n    {\r\n        if (selectedNode)\r\n        {\r\n            selectedNode.SetSelected(false);\r\n            selectedNode.Rect.localScale = Vector3.one;\r\n        }\r\n        selectedNode = null; selectedGuid = null;\r\n        infoPanel?.Hide(false);\r\n    }\r\n\r\n    private bool MoveSelectionInDirection(Vector2 dir)\r\n    {\r\n        if (!selectedNode) { AutoSelectClosestToCenter(); return selectedNode != null; }\r\n\r\n        var from = selectedNode.Rect.anchoredPosition;\r\n        string bestGuid = null;\r\n        float bestScore = float.MaxValue;\r\n        foreach (var kv in nodes)\r\n        {\r\n            var n = kv.Value; if (!n || n == selectedNode) continue;\r\n            Vector2 to = n.Rect.anchoredPosition - from;\r\n            float dist = to.magnitude; if (dist < minHopDistance) continue;\r\n            Vector2 nd = to / dist;\r\n            float dot = Vector2.Dot(nd, dir);\r\n            if (dot < cosCone) continue;\r\n            float angleCost = 1f - dot;\r\n            float distCost = dist * 0.0015f;\r\n            float score = angleCost * 1.25f + distCost;\r\n            if (score < bestScore) { bestScore = score; bestGuid = kv.Key; }\r\n        }\r\n        if (bestGuid != null && nodes.TryGetValue(bestGuid, out var bestNode))\r\n        {\r\n            SelectNodeInternal(bestNode);\r\n            return true;\r\n        }\r\n        return false;\r\n    }\r\n\r\n    private void CenterOnNodeImmediate(ClueNode node)\r\n    {\r\n        if (!node || !node.Rect) return;\r\n\r\n        if (boardCamera)\r\n        {\r\n            boardCamera.FocusOn(node.Rect, immediate: true);\r\n        }\r\n        else\r\n        {\r\n            if (!ContentRect) return;\r\n            ContentRect.anchoredPosition = -node.Rect.anchoredPosition;\r\n            SaveSystem.Instance?.SetBoardPan(ContentRect.anchoredPosition);\r\n        }\r\n\r\n        if (infoPanel && node && (!showInfoOnlyWhenHardFocus || !inFreelook))\r\n            infoPanel.ShowFor(node.Data, immediate: true);\r\n    }\r\n\r\n    // ---------- Auto-link logic ----------\r\n    private void BuildAutoLinksTouching(string guid)\r\n    {\r\n        if (!nodes.ContainsKey(guid)) return;\r\n\r\n        var aData = nodes[guid].Data;\r\n        if (aData?.relatedClueGuids != null)\r\n            foreach (var otherGuid in aData.relatedClueGuids)\r\n                EnsureLineWithStyle(guid, otherGuid);\r\n\r\n        foreach (var kv in nodes)\r\n        {\r\n            var otherData = kv.Value.Data;\r\n            if (otherData?.relatedClueGuids == null) continue;\r\n            if (otherData.relatedClueGuids.Contains(guid))\r\n                EnsureLineWithStyle(kv.Key, guid);\r\n        }\r\n    }\r\n\r\n    private void RebuildAllAutoLinks()\r\n    {\r\n        foreach (var l in lines.Values) if (l) Destroy(l.gameObject);\r\n        lines.Clear();\r\n\r\n        foreach (var a in nodes)\r\n        {\r\n            var aData = a.Value.Data;\r\n            if (aData?.relatedClueGuids == null) continue;\r\n            foreach (var bGuid in aData.relatedClueGuids)\r\n                EnsureLineWithStyle(a.Key, bGuid);\r\n        }\r\n        foreach (var b in nodes)\r\n        {\r\n            var bData = b.Value.Data;\r\n            if (bData?.relatedClueGuids == null) continue;\r\n            foreach (var aGuid in bData.relatedClueGuids)\r\n                EnsureLineWithStyle(aGuid, b.Key);\r\n        }\r\n    }\r\n\r\n    private (string, string) PairKey(string a, string b)\r\n    {\r\n        if (string.IsNullOrEmpty(a) || string.IsNullOrEmpty(b)) return default;\r\n        return string.CompareOrdinal(a, b) <= 0 ? (a, b) : (b, a);\r\n    }\r\n\r\n    private void EnsureLineWithStyle(string aGuid, string bGuid)\r\n    {\r\n        if (string.IsNullOrEmpty(aGuid) || string.IsNullOrEmpty(bGuid)) return;\r\n        if (aGuid == bGuid) return;\r\n        if (!nodes.ContainsKey(aGuid) || !nodes.ContainsKey(bGuid)) return;\r\n\r\n        bool confirmed = SaveSystem.Instance != null && SaveSystem.Instance.IsLinkConfirmed(aGuid, bGuid);\r\n\r\n        var key = PairKey(aGuid, bGuid);\r\n        if (lines.TryGetValue(key, out var existing))\r\n        {\r\n            if (confirmed) { if (existing) Destroy(existing.gameObject); lines.Remove(key); }\r\n            else return;\r\n        }\r\n\r\n        if (!linePrefab) { Debug.LogWarning(\"[CognitionBoard] No linePrefab assigned; cannot draw auto-links.\"); return; }\r\n\r\n        var aNode = nodes[key.Item1];\r\n        var bNode = nodes[key.Item2];\r\n        var aAnchor = aNode.LineAnchor ? aNode.LineAnchor : aNode.Rect;\r\n        var bAnchor = bNode.LineAnchor ? bNode.LineAnchor : bNode.Rect;\r\n\r\n        var line = Instantiate(linePrefab, linesLayer);\r\n        if (confirmed) line.Initialize(aAnchor, bAnchor, confirmedColor, confirmedWidth);\r\n        else line.Initialize(aAnchor, bAnchor, suggestedColor, suggestedWidth);\r\n\r\n        int ia = SaveSystem.Instance ? SaveSystem.Instance.GetDiscoveryIndex(key.Item1) : int.MaxValue;\r\n        int ib = SaveSystem.Instance ? SaveSystem.Instance.GetDiscoveryIndex(key.Item2) : int.MaxValue;\r\n        bool fromA = ia <= ib;\r\n        line.SetGrowFrom(fromA);\r\n\r\n        if (!gameObject.activeInHierarchy && playRevealOnOpen)\r\n        {\r\n            line.SetReveal(0f);\r\n            if (pendingLineSet.Add(key))\r\n                pendingLineReveals.Add(key);\r\n        }\r\n        else\r\n        {\r\n            line.SetReveal(1f);\r\n        }\r\n\r\n        lines[key] = line;\r\n    }\r\n\r\n    public void AddSuggestedConnectionsFor(string guid) => BuildAutoLinksTouching(guid);\r\n    public void BuildAllAutoConnections() => RebuildAllAutoLinks();\r\n    public void RestoreConnectionsFromSave() => RebuildAllAutoLinks();\r\n\r\n    // ---------- Reveal sequence on open ----------\r\n    private System.Collections.IEnumerator PlayOpenRevealSequence()\r\n    {\r\n        var order = SaveSystem.Instance ? SaveSystem.Instance.GetDiscoveryOrder() : null;\r\n        if (order != null && order.Count > 0 && pendingNodePops.Count > 0)\r\n        {\r\n            for (int i = 0; i < order.Count; i++)\r\n            {\r\n                string guid = order[i];\r\n                if (!pendingNodePops.Contains(guid)) continue;\r\n                if (!nodes.TryGetValue(guid, out var node) || !node || !node.Rect) continue;\r\n\r\n                float t = 0f;\r\n                while (t < 1f)\r\n                {\r\n                    t += Time.unscaledDeltaTime / Mathf.Max(0.01f, nodePopDuration);\r\n                    float s = Mathf.SmoothStep(0f, 1f, t);\r\n                    node.Rect.localScale = new Vector3(s, s, 1f);\r\n                    yield return null;\r\n                }\r\n                node.Rect.localScale = Vector3.one;\r\n\r\n                float end = Time.unscaledTime + nodePopStagger;\r\n                while (Time.unscaledTime < end) yield return null;\r\n            }\r\n        }\r\n        pendingNodePops.Clear();\r\n\r\n        if (pendingLineReveals.Count > 0)\r\n        {\r\n            pendingLineReveals.Sort((p, q) =>\r\n            {\r\n                int pa = SaveSystem.Instance ? SaveSystem.Instance.GetDiscoveryIndex(p.Item1) : int.MaxValue;\r\n                int pb = SaveSystem.Instance ? SaveSystem.Instance.GetDiscoveryIndex(p.Item2) : int.MaxValue;\r\n                int qa = SaveSystem.Instance ? SaveSystem.Instance.GetDiscoveryIndex(q.Item1) : int.MaxValue;\r\n                int qb = SaveSystem.Instance ? SaveSystem.Instance.GetDiscoveryIndex(q.Item2) : int.MaxValue;\r\n\r\n                int pKey = Mathf.Max(pa, pb);\r\n                int qKey = Mathf.Max(qa, qb);\r\n                return pKey.CompareTo(qKey);\r\n            });\r\n\r\n            foreach (var key in pendingLineReveals)\r\n            {\r\n                if (!lines.TryGetValue(key, out var line) || line == null) continue;\r\n\r\n                float t = 0f;\r\n                while (t < 1f)\r\n                {\r\n                    t += Time.unscaledDeltaTime / Mathf.Max(0.01f, revealDurationPerLine);\r\n                    line.SetReveal(Mathf.SmoothStep(0f, 1f, t));\r\n                    yield return null;\r\n                }\r\n                line.SetReveal(1f);\r\n\r\n                float end = Time.unscaledTime + revealStagger;\r\n                while (Time.unscaledTime < end) yield return null;\r\n            }\r\n        }\r\n\r\n        pendingLineReveals.Clear();\r\n        pendingLineSet.Clear();\r\n    }\r\n\r\n    public void ClearAll()\r\n    {\r\n        foreach (var kv in nodes)\r\n            if (kv.Value) Destroy(kv.Value.gameObject);\r\n        nodes.Clear();\r\n\r\n        foreach (var kv in lines)\r\n            if (kv.Value) Destroy(kv.Value.gameObject);\r\n        lines.Clear();\r\n\r\n        if (ContentRect)\r\n        {\r\n            ContentRect.localScale = Vector3.one;\r\n            ContentRect.anchoredPosition = Vector2.zero;\r\n        }\r\n\r\n        SaveSystem.Instance?.SetBoardZoom(1f);\r\n        SaveSystem.Instance?.SetBoardPan(Vector2.zero);\r\n        infoPanel?.Hide(true);\r\n    }\r\n\r\n    // ---------- Placement helpers ----------\r\n    private Vector2 GetViewCenterLocal()\r\n    {\r\n        if (viewportRect && ContentRect && viewportRect.gameObject.activeInHierarchy)\r\n        {\r\n            var vpWorld = viewportRect.TransformPoint(viewportRect.rect.center);\r\n            Vector2 local;\r\n            RectTransformUtility.ScreenPointToLocalPointInRectangle(\r\n                ContentRect, RectTransformUtility.WorldToScreenPoint(null, vpWorld), null, out local);\r\n            return local;\r\n        }\r\n        return -ContentRect.anchoredPosition;\r\n    }\r\n\r\n    private bool IsFarEnoughFromOthers(Vector2 p, float minDist)\r\n    {\r\n        float minSqr = minDist * minDist;\r\n        foreach (var kv in nodes)\r\n        {\r\n            var n = kv.Value;\r\n            if (!n || !n.Rect) continue;\r\n            var d = (n.Rect.anchoredPosition - p).sqrMagnitude;\r\n            if (d < minSqr) return false;\r\n        }\r\n        return true;\r\n    }\r\n\r\n    private Vector2 FindFreeSpot(Vector2 seed, float minDist)\r\n    {\r\n        float r = Mathf.Max(0f, spawnRadiusStart);\r\n        var rand = new System.Random((int)(Time.realtimeSinceStartup * 1000f));\r\n\r\n        while (r <= spawnRadiusMax)\r\n        {\r\n            int samples = Mathf.Clamp(Mathf.CeilToInt(2f * Mathf.PI * r / Mathf.Max(1f, minDist)), 8, 48);\r\n            for (int i = 0; i < samples; i++)\r\n            {\r\n                float t = (i + (float)rand.NextDouble() * 0.35f) / samples;\r\n                float ang = t * Mathf.PI * 2f;\r\n                var p = seed + new Vector2(Mathf.Cos(ang), Mathf.Sin(ang)) * r;\r\n                if (IsFarEnoughFromOthers(p, minDist)) return p;\r\n            }\r\n            r += Mathf.Max(8f, spawnRadiusStep);\r\n        }\r\n        return seed;\r\n    }\r\n\r\n    private bool TryGetExistingRelatedCentroid(ClueData data, out Vector2 centroid)\r\n    {\r\n        centroid = Vector2.zero;\r\n        if (data?.relatedClueGuids == null || data.relatedClueGuids.Count == 0) return false;\r\n\r\n        int count = 0;\r\n        foreach (var gid in data.relatedClueGuids)\r\n        {\r\n            if (string.IsNullOrEmpty(gid)) continue;\r\n            if (nodes.TryGetValue(gid, out var n) && n && n.Rect)\r\n            {\r\n                centroid += n.Rect.anchoredPosition;\r\n                count++;\r\n            }\r\n        }\r\n        if (count == 0) return false;\r\n        centroid /= count;\r\n        return true;\r\n    }\r\n\r\n    private Vector2 ClampWithinRelatedMax(Vector2 desired, Vector2 centroid, float maxDist)\r\n    {\r\n        var delta = desired - centroid;\r\n        float d = delta.magnitude;\r\n        if (d <= maxDist || d <= Mathf.Epsilon) return desired;\r\n        return centroid + delta / d * maxDist;\r\n    }\r\n\r\n    // ---------- math ----------\r\n    private static float ExpoRamp(float start, float max, float heldTime, float rampTime)\r\n    {\r\n        if (heldTime <= 0f) return Mathf.Max(0f, start);\r\n        if (rampTime <= 0f) return Mathf.Max(start, max);\r\n\r\n        float s = Mathf.Max(0.0001f, start);\r\n        float ratio = Mathf.Max(0.0001f, max / s);\r\n        float u = Mathf.Clamp01(heldTime / rampTime);\r\n        return s * Mathf.Pow(ratio, u); // exact start->max in rampTime\r\n    }\r\n      private System.Collections.IEnumerator PlayDiscoveryCutscene()\r\n    {\r\n        bool wasInFreelook = inFreelook; \r\n        inFreelook = false;\r\n\r\n        float targetZoom = Mathf.Max(0.05f, cutsceneZoom);\r\n\r\n        // Copy & clear pending new nodes\r\n        var newGuids = new List<string>(pendingNodePops);\r\n        pendingNodePops.Clear();\r\n\r\n        // Optional: sort by discovery order if you track it\r\n        newGuids.Sort((a,b) =>\r\n        {\r\n            int ia = SaveSystem.Instance ? SaveSystem.Instance.GetDiscoveryIndex(a) : 0;\r\n            int ib = SaveSystem.Instance ? SaveSystem.Instance.GetDiscoveryIndex(b) : 0;\r\n            return ia.CompareTo(ib);\r\n        });\r\n\r\n        // Input checker\r\n        System.Func<bool> justPressed = () =>\r\n        {\r\n            var a = interactAction ? interactAction.action : (submitAction ? submitAction.action : null);\r\n            return a != null && a.WasPressedThisFrame();\r\n        };\r\n\r\n        // Smooth zoom helper\r\n        System.Collections.IEnumerator SmoothSetZoom(float z)\r\n        {\r\n            float t = 0f;\r\n            float z0 = CurrentZoom;\r\n            while (t < 1f)\r\n            {\r\n                t += Time.unscaledDeltaTime * 6f;\r\n                float v = Mathf.Lerp(z0, z, 1f - Mathf.Exp(-10f * t));\r\n                SetZoom(v);\r\n                yield return null;\r\n            }\r\n            SetZoom(z);\r\n        }\r\n\r\n        // MAIN LOOP\r\n        for (int i = 0; i < newGuids.Count; i++)\r\n        {\r\n            if (!nodes.TryGetValue(newGuids[i], out var node) || !node) continue;\r\n\r\n            boardCamera?.FocusOn(node.Rect, immediate: false);\r\n            yield return StartCoroutine(SmoothSetZoom(targetZoom));\r\n            boardCamera?.FocusOn(node.Rect, immediate: false);\r\n\r\n            // Node pop\r\n            if (node.Rect.localScale.x < 0.95f)\r\n            {\r\n                float tPop = 0f;\r\n                Vector3 from = node.Rect.localScale;\r\n                Vector3 to   = Vector3.one;\r\n                while (tPop < 1f)\r\n                {\r\n                    tPop += Time.unscaledDeltaTime / Mathf.Max(0.01f, nodePopDuration);\r\n                    float e = Mathf.SmoothStep(0f, 1f, tPop);\r\n                    node.Rect.localScale = Vector3.LerpUnclamped(from, to, e);\r\n                    yield return null;\r\n                }\r\n                node.Rect.localScale = Vector3.one;\r\n            }\r\n\r\n            // Info panel\r\n            if (infoPanel)\r\n                infoPanel.ShowFor(node.Data, immediate: false);\r\n\r\n            // If a line to the next node exists, reveal & follow it\r\n            // NOTE: Replace the entire \"line to next node\" block with this version.\r\n// It uses PairKey(...) and EnsureLineWithStyle(...). It also avoids undefined helpers.\r\n\r\nif (i + 1 < newGuids.Count)\r\n{\r\n    var nextGuid = newGuids[i + 1];\r\n\r\n    // Ensure the line exists (this will instantiate it, choose style, and register in `lines`)\r\n    EnsureLineWithStyle(newGuids[i], nextGuid);\r\n\r\n    // Try to animate the reveal manually (even if EnsureLineWithStyle set it to 1).\r\n    var key = PairKey(newGuids[i], nextGuid);\r\n    if (lines.TryGetValue(key, out var line) && line != null)\r\n    {\r\n        // Start from 0 for a visible \"string draw\" unless the player skips.\r\n        line.SetReveal(0f);\r\n\r\n        float t = 0f;\r\n        while (t < 1f && !justPressed())\r\n        {\r\n            t += Time.unscaledDeltaTime / Mathf.Max(0.01f, revealDurationPerLine);\r\n            line.SetReveal(t);\r\n\r\n            // Simple camera behavior: ease focus toward the NEXT node while the string draws.\r\n            if (nodes.TryGetValue(nextGuid, out var nextNode) && nextNode && nextNode.Rect)\r\n                boardCamera?.FocusOn(nextNode.Rect, immediate: false);\r\n\r\n            yield return null;\r\n        }\r\n\r\n        // If the player didn’t skip, ensure we complete the reveal.\r\n        line.SetReveal(1f);\r\n    }\r\n}\r\n\r\n\r\n            // Wait for player input\r\n            while (!justPressed()) yield return null;\r\n\r\n            infoPanel?.Hide(false);\r\n        }\r\n\r\n        // End: zoom out to default\r\n        yield return StartCoroutine(SmoothSetZoom(Mathf.Max(0.05f, defaultZoom)));\r\n\r\n        if (selectedNode)\r\n            boardCamera?.FocusOn(selectedNode.Rect, immediate: false);\r\n        else\r\n            SelectClosestToViewCenterAndFocus();\r\n\r\n        inFreelook = wasInFreelook;\r\n        discoveryRoutine = null;\r\n    }\r\n}\r\n",
+            "serializedFields": [
+                {
+                    "name": "contentRect",
+                    "type": "UnityEngine.RectTransform",
+                    "isPublic": false,
+                    "hasSerializeField": true
+                },
+                {
+                    "name": "nodePrefab",
+                    "type": "ClueNode",
+                    "isPublic": false,
+                    "hasSerializeField": true
+                },
+                {
+                    "name": "linePrefab",
+                    "type": "ConnectionLineUI",
+                    "isPublic": false,
+                    "hasSerializeField": true
+                },
+                {
+                    "name": "infoPanel",
+                    "type": "ClueInfoPanel",
+                    "isPublic": false,
+                    "hasSerializeField": true
+                },
+                {
+                    "name": "showInfoOnlyWhenHardFocus",
+                    "type": "System.Boolean",
+                    "isPublic": false,
+                    "hasSerializeField": true
+                },
+                {
+                    "name": "suggestedColor",
+                    "type": "UnityEngine.Color",
+                    "isPublic": false,
+                    "hasSerializeField": true
+                },
+                {
+                    "name": "suggestedWidth",
+                    "type": "System.Single",
+                    "isPublic": false,
+                    "hasSerializeField": true
+                },
+                {
+                    "name": "confirmedColor",
+                    "type": "UnityEngine.Color",
+                    "isPublic": false,
+                    "hasSerializeField": true
+                },
+                {
+                    "name": "confirmedWidth",
+                    "type": "System.Single",
+                    "isPublic": false,
+                    "hasSerializeField": true
+                },
+                {
+                    "name": "autoPlayDiscoveryCutsceneOnOpen",
+                    "type": "System.Boolean",
+                    "isPublic": false,
+                    "hasSerializeField": true
+                },
+                {
+                    "name": "defaultZoom",
+                    "type": "System.Single",
+                    "isPublic": false,
+                    "hasSerializeField": true
+                },
+                {
+                    "name": "cutsceneZoom",
+                    "type": "System.Single",
+                    "isPublic": false,
+                    "hasSerializeField": true
+                },
+                {
+                    "name": "cutscenePanFollowSpeed",
+                    "type": "System.Single",
+                    "isPublic": false,
+                    "hasSerializeField": true
+                },
+                {
+                    "name": "interactAction",
+                    "type": "UnityEngine.InputSystem.InputActionReference",
+                    "isPublic": false,
+                    "hasSerializeField": true
+                },
+                {
+                    "name": "playRevealOnOpen",
+                    "type": "System.Boolean",
+                    "isPublic": false,
+                    "hasSerializeField": true
+                },
+                {
+                    "name": "revealDurationPerLine",
+                    "type": "System.Single",
+                    "isPublic": false,
+                    "hasSerializeField": true
+                },
+                {
+                    "name": "revealStagger",
+                    "type": "System.Single",
+                    "isPublic": false,
+                    "hasSerializeField": true
+                },
+                {
+                    "name": "nodePopDuration",
+                    "type": "System.Single",
+                    "isPublic": false,
+                    "hasSerializeField": true
+                },
+                {
+                    "name": "nodePopStagger",
+                    "type": "System.Single",
+                    "isPublic": false,
+                    "hasSerializeField": true
+                },
+                {
+                    "name": "navigateAction",
+                    "type": "UnityEngine.InputSystem.InputActionReference",
+                    "isPublic": false,
+                    "hasSerializeField": true
+                },
+                {
+                    "name": "submitAction",
+                    "type": "UnityEngine.InputSystem.InputActionReference",
+                    "isPublic": false,
+                    "hasSerializeField": true
+                },
+                {
+                    "name": "zoomAction",
+                    "type": "UnityEngine.InputSystem.InputActionReference",
+                    "isPublic": false,
+                    "hasSerializeField": true
+                },
+                {
+                    "name": "freeLookAction",
+                    "type": "UnityEngine.InputSystem.InputActionReference",
+                    "isPublic": false,
+                    "hasSerializeField": true
+                },
+                {
+                    "name": "freeLookDeadZone",
+                    "type": "System.Single",
+                    "isPublic": false,
+                    "hasSerializeField": true
+                },
+                {
+                    "name": "invertFreelookY",
+                    "type": "System.Boolean",
+                    "isPublic": false,
+                    "hasSerializeField": true
+                },
+                {
+                    "name": "panSpeedInitial",
+                    "type": "System.Single",
+                    "isPublic": false,
+                    "hasSerializeField": true
+                },
+                {
+                    "name": "panSpeedRampDuration",
+                    "type": "System.Single",
+                    "isPublic": false,
+                    "hasSerializeField": true
+                },
+                {
+                    "name": "panSpeedMax",
+                    "type": "System.Single",
+                    "isPublic": false,
+                    "hasSerializeField": true
+                },
+                {
+                    "name": "zoomStep",
+                    "type": "System.Single",
+                    "isPublic": false,
+                    "hasSerializeField": true
+                },
+                {
+                    "name": "zoomRateInitial",
+                    "type": "System.Single",
+                    "isPublic": false,
+                    "hasSerializeField": true
+                },
+                {
+                    "name": "zoomRateRampDuration",
+                    "type": "System.Single",
+                    "isPublic": false,
+                    "hasSerializeField": true
+                },
+                {
+                    "name": "zoomRateMax",
+                    "type": "System.Single",
+                    "isPublic": false,
+                    "hasSerializeField": true
+                },
+                {
+                    "name": "keepSelectedCentered",
+                    "type": "System.Boolean",
+                    "isPublic": false,
+                    "hasSerializeField": true
+                },
+                {
+                    "name": "navDeadZone",
+                    "type": "System.Single",
+                    "isPublic": false,
+                    "hasSerializeField": true
+                },
+                {
+                    "name": "navFirstDelay",
+                    "type": "System.Single",
+                    "isPublic": false,
+                    "hasSerializeField": true
+                },
+                {
+                    "name": "navRepeat",
+                    "type": "System.Single",
+                    "isPublic": false,
+                    "hasSerializeField": true
+                },
+                {
+                    "name": "dirConeDegrees",
+                    "type": "System.Single",
+                    "isPublic": false,
+                    "hasSerializeField": true
+                },
+                {
+                    "name": "minHopDistance",
+                    "type": "System.Single",
+                    "isPublic": false,
+                    "hasSerializeField": true
+                },
+                {
+                    "name": "selectedScale",
+                    "type": "System.Single",
+                    "isPublic": false,
+                    "hasSerializeField": true
+                },
+                {
+                    "name": "centerOnSubmit",
+                    "type": "System.Boolean",
+                    "isPublic": false,
+                    "hasSerializeField": true
+                },
+                {
+                    "name": "viewportRect",
+                    "type": "UnityEngine.RectTransform",
+                    "isPublic": false,
+                    "hasSerializeField": true
+                },
+                {
+                    "name": "minNodeSpacing",
+                    "type": "System.Single",
+                    "isPublic": false,
+                    "hasSerializeField": true
+                },
+                {
+                    "name": "relatedMaxDistance",
+                    "type": "System.Single",
+                    "isPublic": false,
+                    "hasSerializeField": true
+                },
+                {
+                    "name": "spawnRadiusStart",
+                    "type": "System.Single",
+                    "isPublic": false,
+                    "hasSerializeField": true
+                },
+                {
+                    "name": "spawnRadiusStep",
+                    "type": "System.Single",
+                    "isPublic": false,
+                    "hasSerializeField": true
+                },
+                {
+                    "name": "spawnRadiusMax",
+                    "type": "System.Single",
+                    "isPublic": false,
+                    "hasSerializeField": true
+                },
+                {
+                    "name": "boardCamera",
+                    "type": "BoardCamera",
+                    "isPublic": false,
+                    "hasSerializeField": true
+                }
+            ],
+            "declaredTypes": [
+                "CognitionBoard"
+            ]
+        }
+    ]
+}

@@ -26,11 +26,11 @@ public class ClueInfoPanel : MonoBehaviour
 
     [Header("Typography")]
     [SerializeField] private bool   titleAutoSize   = true;
-    [SerializeField] private float  titleSizeDefault = 64f;   // Max
-    [SerializeField] private float  titleSizeMin     = 36f;   // Min
+    [SerializeField] private float  titleSizeDefault = 64f;
+    [SerializeField] private float  titleSizeMin     = 36f;
     [SerializeField] private bool   bodyAutoSize    = true;
-    [SerializeField] private float  bodySizeDefault  = 36f;   // Max
-    [SerializeField] private float  bodySizeMin      = 26f;   // Min
+    [SerializeField] private float  bodySizeDefault  = 36f;
+    [SerializeField] private float  bodySizeMin      = 26f;
     [SerializeField] private TextOverflowModes titleOverflow = TextOverflowModes.Truncate;
     [SerializeField] private TextOverflowModes bodyOverflow  = TextOverflowModes.Truncate;
 
@@ -42,6 +42,15 @@ public class ClueInfoPanel : MonoBehaviour
     [SerializeField] private bool  retriggerTypeOnRefresh = true;
 
     public bool IsVisible { get; private set; }
+
+    // NOTE: expose typing state so the board can guard input properly
+    public bool IsTyping { get; private set; } = false;                       // NOTE
+    public void CompleteTyping()                                              // NOTE
+    {
+        if (typeRoutine != null) { StopCoroutine(typeRoutine); typeRoutine = null; }
+        if (bodyText) bodyText.maxVisibleCharacters = int.MaxValue;
+        IsTyping = false;
+    }
 
     private Vector2 baseAnchoredPos;
     private Coroutine showRoutine;
@@ -68,7 +77,6 @@ public class ClueInfoPanel : MonoBehaviour
             iconImage = null;
         }
 
-        // Apply typography once
         ApplyTypography();
 
         if (group) group.alpha = 0f;
@@ -78,14 +86,12 @@ public class ClueInfoPanel : MonoBehaviour
 
     private void LateUpdate()
     {
-        // Hard lock background sprite against accidental writes.
         if (backgroundImage && backgroundImage.sprite != backgroundSpriteAtStart)
             backgroundImage.sprite = backgroundSpriteAtStart;
     }
 
     private void OnEnable()
     {
-        // If something was queued while inactive, apply immediately.
         if (queuedVisible)
         {
             ApplyShowImmediate();
@@ -97,9 +103,9 @@ public class ClueInfoPanel : MonoBehaviour
     {
         if (showRoutine != null) { StopCoroutine(showRoutine); showRoutine = null; }
         if (typeRoutine != null) { StopCoroutine(typeRoutine); typeRoutine = null; }
+        IsTyping = false; // NOTE
     }
 
-    // ────────────────────────────────────────────────────────────────────────────
     public void ShowFor(ClueData data, bool immediate)
     {
         if (!data) { Hide(immediate); return; }
@@ -130,16 +136,11 @@ public class ClueInfoPanel : MonoBehaviour
         showRoutine = StartCoroutine(HideRoutine(immediate));
     }
 
-    // ────────────────────────────────────────────────────────────────────────────
     private void FillFromData(ClueData data, bool immediate)
     {
-        // Title
         if (titleText)
-        {
             titleText.text = string.IsNullOrWhiteSpace(data.clueName) ? "" : data.clueName;
-        }
 
-        // Body
         if (bodyText)
         {
             bodyText.textWrappingMode = TextWrappingModes.Normal;
@@ -153,10 +154,10 @@ public class ClueInfoPanel : MonoBehaviour
             else
             {
                 bodyText.maxVisibleCharacters = int.MaxValue;
+                IsTyping = false; // NOTE
             }
         }
 
-        // Icon (only the child image)
         if (showIcon && iconImage)
         {
             iconImage.sprite = data.icon;
@@ -169,7 +170,6 @@ public class ClueInfoPanel : MonoBehaviour
             ApplyIconVisible(false);
         }
 
-        // Re-enforce background
         if (backgroundImage && backgroundImage.sprite != backgroundSpriteAtStart)
             backgroundImage.sprite = backgroundSpriteAtStart;
     }
@@ -181,7 +181,7 @@ public class ClueInfoPanel : MonoBehaviour
             titleText.enableAutoSizing = titleAutoSize;
             titleText.fontSizeMax      = titleSizeDefault;
             titleText.fontSizeMin      = titleSizeMin;
-            titleText.fontSize         = titleSizeDefault; // start at default
+            titleText.fontSize         = titleSizeDefault;
             titleText.overflowMode     = titleOverflow;
         }
 
@@ -190,7 +190,7 @@ public class ClueInfoPanel : MonoBehaviour
             bodyText.enableAutoSizing = bodyAutoSize;
             bodyText.fontSizeMax      = bodySizeDefault;
             bodyText.fontSizeMin      = bodySizeMin;
-            bodyText.fontSize         = bodySizeDefault; // start at default
+            bodyText.fontSize         = bodySizeDefault;
             bodyText.overflowMode     = bodyOverflow;
             bodyText.textWrappingMode = TextWrappingModes.Normal;
         }
@@ -267,6 +267,7 @@ public class ClueInfoPanel : MonoBehaviour
         if (total <= 0 || cps <= 0f)
         {
             text.maxVisibleCharacters = int.MaxValue;
+            IsTyping = false; // NOTE
             yield break;
         }
 
@@ -274,6 +275,7 @@ public class ClueInfoPanel : MonoBehaviour
         float perChar = 1f / cps;
         float acc = 0f;
         int shown = 0;
+        IsTyping = true; // NOTE
 
         while (shown < total)
         {
@@ -288,6 +290,7 @@ public class ClueInfoPanel : MonoBehaviour
         }
 
         text.maxVisibleCharacters = int.MaxValue;
+        IsTyping = false; // NOTE
     }
 
     private void ApplyIconVisible(bool on)

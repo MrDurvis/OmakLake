@@ -10,13 +10,13 @@ public class ConnectionLineUI : MonoBehaviour
     [SerializeField] private RectTransform container;  // parent (Lines layer)
 
     [Range(0f, 1f)] public float reveal = 1f;          // 0..1 length
-    private bool growFromA = true;                     // NEW: direction of reveal
+    private bool growFromA = true;
 
     public void Initialize(RectTransform a, RectTransform b, Color color, float width)
     {
         from = a; to = b;
-        if (!lineRect)  lineRect  = GetComponent<RectTransform>();
-        if (!image)     image     = GetComponent<Image>();
+        if (!lineRect) lineRect = GetComponent<RectTransform>();
+        if (!image) image = GetComponent<Image>();
         if (!container) container = (RectTransform)transform.parent;
 
         if (image) image.color = color;
@@ -36,7 +36,7 @@ public class ConnectionLineUI : MonoBehaviour
         UpdateLine();
     }
 
-    public void SetGrowFrom(bool fromA) => growFromA = fromA; // NEW
+    public void SetGrowFrom(bool fromA) => growFromA = fromA;
 
     private void SetThickness(float width)
     {
@@ -70,11 +70,11 @@ public class ConnectionLineUI : MonoBehaviour
         else if (growFromA)
         {
             start = a;
-            end   = a + delta * Mathf.Clamp01(reveal);
+            end = a + delta * Mathf.Clamp01(reveal);
         }
         else
         {
-            end   = b;
+            end = b;
             start = b - delta * Mathf.Clamp01(reveal);
         }
 
@@ -92,5 +92,25 @@ public class ConnectionLineUI : MonoBehaviour
     {
         Vector3 world = rt.TransformPoint(rt.rect.center);
         return ((RectTransform)transform.parent).InverseTransformPoint(world);
+    }
+
+    // NOTE: helpers for camera-follow (tip tracking)
+    public Vector3 GetEndpointWorldA()
+    {
+        if (!from) return transform.position;
+        return from.TransformPoint(from.rect.center);
+    }
+    public Vector3 GetEndpointWorldB()
+    {
+        if (!to) return transform.position;
+        return to.TransformPoint(to.rect.center);
+    }
+    public Vector3 GetRevealTipWorld()
+    {
+        var a = GetEndpointWorldA();
+        var b = GetEndpointWorldB();
+        float t = Mathf.Clamp01(reveal);
+        return growFromA ? Vector3.Lerp(a, b, t)
+                         : Vector3.Lerp(b, a, t);
     }
 }

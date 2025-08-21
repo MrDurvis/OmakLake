@@ -4919,6 +4919,14 @@ MonoBehaviour:
   suggestedWidth: 4
   confirmedColor: {r: 0.2, g: 0.9, b: 0.35, a: 1}
   confirmedWidth: 5.5
+  useCutsceneForNewNodes: 1
+  defaultZoom: 1
+  cutsceneZoom: 2.2
+  cutsceneInZoomSeconds: 0.25
+  cutsceneOutZoomSeconds: 0.3
+  panelDelayAfterPop: 0.1
+  minAdvanceDelayAfterType: 0.12
+  lockInputsDuringCutscene: 1
   playRevealOnOpen: 1
   revealDurationPerLine: 1
   revealStagger: 0.1

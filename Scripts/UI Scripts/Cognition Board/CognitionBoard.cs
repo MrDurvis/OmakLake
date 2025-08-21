@@ -21,6 +21,18 @@ public class CognitionBoard : MonoBehaviour
     [SerializeField] private Color confirmedColor = new(0.20f, 0.90f, 0.35f, 1f);
     [SerializeField] private float confirmedWidth = 5.5f;
 
+    // ─────────────────────────────────────────────────────────────────────
+    // Cutscene tuning
+    [Header("New Node Cutscene")]
+    [SerializeField] private bool useCutsceneForNewNodes = true;
+    [SerializeField] private float defaultZoom = 1.0f;
+    [SerializeField] private float cutsceneZoom = 2.2f;
+    [SerializeField] private float cutsceneInZoomSeconds = 0.25f;
+    [SerializeField] private float cutsceneOutZoomSeconds = 0.30f;
+    [SerializeField] private float panelDelayAfterPop = 0.10f;
+    [SerializeField] private float minAdvanceDelayAfterType = 0.50f;
+    [SerializeField] private bool  lockInputsDuringCutscene = true;
+
     [Header("Reveal (play on open)")]
     [SerializeField] private bool playRevealOnOpen = true;
     [SerializeField] private float revealDurationPerLine = 0.35f;
@@ -30,42 +42,34 @@ public class CognitionBoard : MonoBehaviour
 
     [Header("Navigation (UI map)")]
     [SerializeField] private InputActionReference navigateAction; // left stick / WASD
-    [SerializeField] private InputActionReference submitAction;
+    [SerializeField] private InputActionReference submitAction;   // advance/skip
 
     [Header("Zoom Input")]
-    [SerializeField] private InputActionReference zoomAction; // scroll / triggers / etc.
+    [SerializeField] private InputActionReference zoomAction;
 
     // -------------------- FREELOOK --------------------
     [Header("Freelook (right stick)")]
-    [SerializeField] private InputActionReference freeLookAction;      // right stick
+    [SerializeField] private InputActionReference freeLookAction;
     [SerializeField] private float freeLookDeadZone = 0.25f;
-    [Tooltip("Invert the vertical axis for freelook panning.")]
     [SerializeField] private bool invertFreelookY = false;
 
     [Header("Freelook Speed Ramp")]
-    [Tooltip("Pixels per second at 1.0x zoom when you first push the stick.")]
     [SerializeField] private float panSpeedInitial = 700f;
-    [Tooltip("How many seconds of held input to reach maximum speed.")]
     [SerializeField] private float panSpeedRampDuration = 0.5f;
-    [Tooltip("Maximum pixels per second at 1.0x zoom while holding the stick.")]
     [SerializeField] private float panSpeedMax = 2200f;
 
     // -------------------- ZOOM --------------------
     [Header("Zoom")]
-    [Tooltip("Base zoom step used to build a multiplicative factor. Positive deltas zoom in, negative zoom out.")]
     [SerializeField] private float zoomStep = 0.1f;
 
     [Header("Zoom Rate Ramp")]
-    [Tooltip("Multiplier on zoomStep when you first start holding the zoom input.")]
     [SerializeField] private float zoomRateInitial = 1.0f;
-    [Tooltip("Seconds of continuous zoom input to reach the maximum zoom rate multiplier.")]
     [SerializeField] private float zoomRateRampDuration = 0.5f;
-    [Tooltip("Maximum multiplier on zoomStep while holding zoom input.")]
     [SerializeField] private float zoomRateMax = 5.0f;
 
     // -------------------- Selection & Centering --------------------
     [Header("Centering")]
-    [SerializeField] private bool keepSelectedCentered = true; // When selection changes, we center once.
+    [SerializeField] private bool keepSelectedCentered = true;
 
     [Header("Navigation Tuning")]
     [SerializeField] private float navDeadZone = 0.5f;
@@ -77,17 +81,15 @@ public class CognitionBoard : MonoBehaviour
     [SerializeField] private bool centerOnSubmit = true;
 
     [Header("Viewport & Placement")]
-    [SerializeField] private RectTransform viewportRect;     // visible area (optional, for centering)
-    [SerializeField] private float minNodeSpacing = 140f;    // minimum distance between nodes
-    [SerializeField] private float relatedMaxDistance = 420f;// cap distance from related centroid
+    [SerializeField] private RectTransform viewportRect;
+    [SerializeField] private float minNodeSpacing = 140f;
+    [SerializeField] private float relatedMaxDistance = 420f;
     [SerializeField] private float spawnRadiusStart = 80f;
     [SerializeField] private float spawnRadiusStep = 60f;
     [SerializeField] private float spawnRadiusMax = 1200f;
 
-    // BoardCamera reference (drives pan & zoom robustly)
     [SerializeField] private BoardCamera boardCamera;
 
-    // Internals / accessors
     public RectTransform ContentRect => contentRect ? contentRect : (RectTransform)transform;
     public float CurrentZoom => ContentRect ? ContentRect.localScale.x : 1f;
 
@@ -111,8 +113,15 @@ public class CognitionBoard : MonoBehaviour
 
     // state
     private bool inFreelook;
-    private float freelookHeldTime; // seconds held this press
-    private float zoomHeldTime;     // seconds held this press
+    private float freelookHeldTime;
+    private float zoomHeldTime;
+
+    // Input gate for cutscene
+    private bool cutsceneActive = false;
+
+    // Prevent double-start (OnEnable + NotifyBoardOpened)
+    private bool cutsceneScheduled = false;
+    private bool cutsceneRunning   = false;
 
     private void Awake()
     {
@@ -135,15 +144,58 @@ public class CognitionBoard : MonoBehaviour
         freelookHeldTime = 0f;
         zoomHeldTime = 0f;
 
+        bool willCutscene = useCutsceneForNewNodes && HasPendingReveals();
+
+        if (willCutscene && !cutsceneScheduled && !cutsceneRunning)
+        {
+            cutsceneScheduled = true;
+            cutsceneActive = true;
+            infoPanel?.Hide(true);
+
+            var ordered = BuildOrderedNewNodes(); // filters to truly-new nodes
+
+            if (ordered.Count > 0)
+            {
+                var prime = ordered[^1];           // most recent pending node (what the player just found)
+                SelectNodeInternal(prime);
+
+                // SNAP focus now and persist pan to defeat any external restore-on-open.
+                if (boardCamera && prime && prime.Rect)
+                {
+                    boardCamera.FocusOn(prime.Rect, immediate: true);
+                }
+                // Persist the pan & (current) zoom so any “restore layout” uses this.
+                SaveSystem.Instance?.SetBoardPan(ContentRect.anchoredPosition);
+                SaveSystem.Instance?.SetBoardZoom(boardCamera ? boardCamera.CurrentZoom : CurrentZoom);
+
+                Debug.Log($"[CognitionBoard] OnEnable: preselect first new node '{prime.Data?.clueName}'.", this);
+                Debug.Log($"[CognitionBoard] Precenter persisted. Pan={ContentRect.anchoredPosition} Zoom={(boardCamera? boardCamera.CurrentZoom : CurrentZoom):0.00}", this);
+            }
+            else
+            {
+                Debug.Log("[CognitionBoard] OnEnable: no filtered new nodes (nothing to reveal).", this);
+            }
+
+            StopAllCoroutines();
+            StartCoroutine(PlayDiscoveryCutscene(ordered));
+            return;
+        }
+
+        // No cutscene path
         if (selectedNode == null) AutoSelectClosestToCenter();
         else if (keepSelectedCentered && boardCamera && selectedNode)
             boardCamera.FocusOn(selectedNode.Rect, immediate: false);
 
         if (selectedNode) selectedNode.SetSelected(true);
 
-        // Show info panel immediately if we have a selection and we’re not in freelook
         if (infoPanel && selectedNode && (!showInfoOnlyWhenHardFocus || !inFreelook))
             infoPanel.ShowFor(selectedNode.Data, immediate: true);
+
+        if (playRevealOnOpen && HasPendingReveals())
+        {
+            StopAllCoroutines();
+            StartCoroutine(PlayOpenRevealSequence());
+        }
     }
 
     private void OnDisable()
@@ -161,6 +213,11 @@ public class CognitionBoard : MonoBehaviour
         try { freeLookAction?.action?.Disable(); } catch { }
 
         infoPanel?.Hide(true);
+
+        // reset guards
+        cutsceneActive   = false;
+        cutsceneScheduled = false;
+        cutsceneRunning   = false;
     }
 
     private void EnsureLayers()
@@ -236,12 +293,11 @@ public class CognitionBoard : MonoBehaviour
 
         nodes.Add(data.Guid, node);
 
-        if (!gameObject.activeInHierarchy && playRevealOnOpen)
-        {
-            node.Rect.localScale = Vector3.zero;
-            if (!pendingNodePops.Contains(data.Guid))
-                pendingNodePops.Add(data.Guid);
-        }
+        // Hide new nodes until reveal
+        node.Rect.localScale = Vector3.zero;
+
+        if (!pendingNodePops.Contains(data.Guid))
+            pendingNodePops.Add(data.Guid);
 
         BuildAutoLinksTouching(data.Guid);
 
@@ -272,24 +328,57 @@ public class CognitionBoard : MonoBehaviour
         AutoSelectClosestToCenter();
 
         if (selectedNode) selectedNode.SetSelected(true);
-
-        if (infoPanel && selectedNode && (!showInfoOnlyWhenHardFocus || !inFreelook))
-            infoPanel.ShowFor(selectedNode.Data, immediate: true);
     }
 
     public void NotifyBoardOpened()
     {
-        if (!playRevealOnOpen) { pendingNodePops.Clear(); pendingLineReveals.Clear(); pendingLineSet.Clear(); return; }
         if (!gameObject.activeInHierarchy) return;
-        if (pendingNodePops.Count == 0 && pendingLineReveals.Count == 0) return;
 
-        StopAllCoroutines();
-        StartCoroutine(PlayOpenRevealSequence());
+        if (useCutsceneForNewNodes && HasPendingReveals())
+        {
+            if (!cutsceneScheduled && !cutsceneRunning)
+            {
+                cutsceneScheduled = true;
+                cutsceneActive = true;
+                infoPanel?.Hide(true);
+
+                var ordered = BuildOrderedNewNodes();
+                if (ordered.Count > 0)
+                {
+                    var prime = ordered[^1];
+                    SelectNodeInternal(prime);
+
+                    // same pre-center+persist here in case this is the only entry point
+                    if (boardCamera && prime && prime.Rect)
+                        boardCamera.FocusOn(prime.Rect, immediate: true);
+
+                    SaveSystem.Instance?.SetBoardPan(ContentRect.anchoredPosition);
+                    SaveSystem.Instance?.SetBoardZoom(boardCamera ? boardCamera.CurrentZoom : CurrentZoom);
+
+                    Debug.Log($"[CognitionBoard] NotifyBoardOpened: preselect '{prime.Data?.clueName}' and persisted pan {ContentRect.anchoredPosition}.", this);
+                }
+
+                StopAllCoroutines();
+                StartCoroutine(PlayDiscoveryCutscene(ordered));
+            }
+            return;
+        }
+
+        if (!playRevealOnOpen) { pendingNodePops.Clear(); pendingLineReveals.Clear(); pendingLineSet.Clear(); return; }
+        if (HasPendingReveals())
+        {
+            StopAllCoroutines();
+            StartCoroutine(PlayOpenRevealSequence());
+        }
     }
+
+    private bool HasPendingReveals() => pendingNodePops.Count > 0 || pendingLineReveals.Count > 0;
 
     // ---------- Update (navigation + freelook + zoom) ----------
     private void Update()
     {
+        if (cutsceneActive) return; // inputs gated during cutscene
+
         if (!isActiveAndEnabled || nodes.Count == 0) return;
 
         float dt = Time.unscaledDeltaTime;
@@ -304,7 +393,6 @@ public class CognitionBoard : MonoBehaviour
         {
             if (invertFreelookY) look.y = -look.y;
 
-            // First frame entering freelook? Hide info panel if it's hard-focus only.
             if (!inFreelook)
             {
                 inFreelook = true;
@@ -325,7 +413,7 @@ public class CognitionBoard : MonoBehaviour
         }
         else
         {
-            freelookHeldTime = 0f; // reset ramp (we remain in freelook until left stick)
+            freelookHeldTime = 0f;
         }
 
         // --- Directional selection (left stick / keys) ----------------------
@@ -335,12 +423,12 @@ public class CognitionBoard : MonoBehaviour
 
         if (mag > navDeadZone)
         {
-            // Leaving freelook via left stick: pick node near center, refocus, show info.
             if (inFreelook)
             {
                 inFreelook = false;
                 SelectClosestToViewCenterAndFocus();
-                if (infoPanel && selectedNode && showInfoOnlyWhenHardFocus)
+
+                if (infoPanel && selectedNode && showInfoOnlyWhenHardFocus == true)
                     infoPanel.ShowFor(selectedNode.Data, immediate: false);
             }
 
@@ -360,7 +448,7 @@ public class CognitionBoard : MonoBehaviour
         if (submitTriggered && selectedNode && centerOnSubmit)
             CenterOnNodeImmediate(selectedNode);
 
-        // --- Zoom input (ramped; no centering during freelook) --------------
+        // --- Zoom input -----------------------------------------------------
         float zDelta = 0f;
         try
         {
@@ -370,12 +458,12 @@ public class CognitionBoard : MonoBehaviour
                 if (controlType == "Vector2")
                 {
                     Vector2 v = zoomAction.action.ReadValue<Vector2>();
-                    if (Mathf.Abs(v.y) > 0.01f) zDelta = Mathf.Sign(v.y); // direction only
+                    if (Mathf.Abs(v.y) > 0.01f) zDelta = Mathf.Sign(v.y);
                 }
-                else // float
+                else
                 {
                     float f = zoomAction.action.ReadValue<float>();
-                    if (Mathf.Abs(f) > 0.01f) zDelta = Mathf.Sign(f); // direction only
+                    if (Mathf.Abs(f) > 0.01f) zDelta = Mathf.Sign(f);
                 }
             }
         }
@@ -384,7 +472,7 @@ public class CognitionBoard : MonoBehaviour
         if (Mathf.Abs(zDelta) > 0f)
         {
             zoomHeldTime += dt;
-            ZoomDelta(zDelta);   // uses zoomHeldTime internally
+            ZoomDelta(zDelta);
         }
         else
         {
@@ -468,8 +556,7 @@ public class CognitionBoard : MonoBehaviour
 
         OnSelectedNodeChanged(selectedNode);
 
-        // Update info panel if we’re not in freelook (or if hard-focus-only is off)
-        if (infoPanel && selectedNode && (!showInfoOnlyWhenHardFocus || !inFreelook))
+        if (!cutsceneActive && infoPanel && selectedNode && (!showInfoOnlyWhenHardFocus || !inFreelook))
             infoPanel.ShowFor(selectedNode.Data, immediate: false);
     }
 
@@ -486,7 +573,7 @@ public class CognitionBoard : MonoBehaviour
             selectedNode.Rect.localScale = Vector3.one;
         }
         selectedNode = null; selectedGuid = null;
-        infoPanel?.Hide(false);
+        if (!cutsceneActive) infoPanel?.Hide(false);
     }
 
     private bool MoveSelectionInDirection(Vector2 dir)
@@ -532,7 +619,7 @@ public class CognitionBoard : MonoBehaviour
             SaveSystem.Instance?.SetBoardPan(ContentRect.anchoredPosition);
         }
 
-        if (infoPanel && node && (!showInfoOnlyWhenHardFocus || !inFreelook))
+        if (!cutsceneActive && infoPanel && node && (!showInfoOnlyWhenHardFocus || !inFreelook))
             infoPanel.ShowFor(node.Data, immediate: true);
     }
 
@@ -606,23 +693,16 @@ public class CognitionBoard : MonoBehaviour
 
         var line = Instantiate(linePrefab, linesLayer);
         if (confirmed) line.Initialize(aAnchor, bAnchor, confirmedColor, confirmedWidth);
-        else           line.Initialize(aAnchor, bAnchor, suggestedColor, suggestedWidth);
+        else line.Initialize(aAnchor, bAnchor, suggestedColor, suggestedWidth);
 
         int ia = SaveSystem.Instance ? SaveSystem.Instance.GetDiscoveryIndex(key.Item1) : int.MaxValue;
         int ib = SaveSystem.Instance ? SaveSystem.Instance.GetDiscoveryIndex(key.Item2) : int.MaxValue;
         bool fromA = ia <= ib;
         line.SetGrowFrom(fromA);
 
-        if (!gameObject.activeInHierarchy && playRevealOnOpen)
-        {
-            line.SetReveal(0f);
-            if (pendingLineSet.Add(key))
-                pendingLineReveals.Add(key);
-        }
-        else
-        {
-            line.SetReveal(1f);
-        }
+        line.SetReveal(0f);
+        if (pendingLineSet.Add(key))
+            pendingLineReveals.Add(key);
 
         lines[key] = line;
     }
@@ -631,7 +711,7 @@ public class CognitionBoard : MonoBehaviour
     public void BuildAllAutoConnections() => RebuildAllAutoLinks();
     public void RestoreConnectionsFromSave() => RebuildAllAutoLinks();
 
-    // ---------- Reveal sequence on open ----------
+    // ---------- Reveal sequence on open (legacy) ----------
     private System.Collections.IEnumerator PlayOpenRevealSequence()
     {
         var order = SaveSystem.Instance ? SaveSystem.Instance.GetDiscoveryOrder() : null;
@@ -661,18 +741,6 @@ public class CognitionBoard : MonoBehaviour
 
         if (pendingLineReveals.Count > 0)
         {
-            pendingLineReveals.Sort((p, q) =>
-            {
-                int pa = SaveSystem.Instance ? SaveSystem.Instance.GetDiscoveryIndex(p.Item1) : int.MaxValue;
-                int pb = SaveSystem.Instance ? SaveSystem.Instance.GetDiscoveryIndex(p.Item2) : int.MaxValue;
-                int qa = SaveSystem.Instance ? SaveSystem.Instance.GetDiscoveryIndex(q.Item1) : int.MaxValue;
-                int qb = SaveSystem.Instance ? SaveSystem.Instance.GetDiscoveryIndex(q.Item2) : int.MaxValue;
-
-                int pKey = Mathf.Max(pa, pb);
-                int qKey = Mathf.Max(qa, qb);
-                return pKey.CompareTo(qKey);
-            });
-
             foreach (var key in pendingLineReveals)
             {
                 if (!lines.TryGetValue(key, out var line) || line == null) continue;
@@ -791,6 +859,12 @@ public class CognitionBoard : MonoBehaviour
         return centroid + delta / d * maxDist;
     }
 
+    // ---------- helpers ----------
+    private static bool IsVisiblyRevealed(ClueNode n)
+    {
+        return n && n.Rect && n.Rect.localScale.x >= 0.9f;
+    }
+
     // ---------- math ----------
     private static float ExpoRamp(float start, float max, float heldTime, float rampTime)
     {
@@ -800,6 +874,217 @@ public class CognitionBoard : MonoBehaviour
         float s = Mathf.Max(0.0001f, start);
         float ratio = Mathf.Max(0.0001f, max / s);
         float u = Mathf.Clamp01(heldTime / rampTime);
-        return s * Mathf.Pow(ratio, u); // exact start->max in rampTime
+        return s * Mathf.Pow(ratio, u);
+    }
+
+    // ─────────────────────────────────────────────────────────────────────
+    // Discovery cutscene (with guards)
+    private System.Collections.IEnumerator PlayDiscoveryCutscene(List<ClueNode> orderedPrecomputed = null)
+    {
+        cutsceneRunning = true;
+        Debug.Log("[CognitionBoard] Cutscene START — inputs gated locally.", this);
+        Debug.Log($"[CognitionBoard] Cutscene START pan={ContentRect.anchoredPosition} zoom={(boardCamera? boardCamera.CurrentZoom : CurrentZoom):0.00}", this);
+
+        // Ensure any queued nodes start at scale 0
+        foreach (var guid in pendingNodePops)
+            if (nodes.TryGetValue(guid, out var n) && n && n.Rect) n.Rect.localScale = Vector3.zero;
+
+        var ordered = (orderedPrecomputed != null && orderedPrecomputed.Count > 0)
+            ? orderedPrecomputed
+            : BuildOrderedNewNodes();
+
+        // Quick zoom IN to cutsceneZoom
+        yield return StartCoroutine(ZoomToOverSeconds(Mathf.Max(0.05f, cutsceneZoom), cutsceneInZoomSeconds));
+
+        for (int i = 0; i < ordered.Count; i++)
+        {
+            var node = ordered[i];
+            if (!node || !node.Rect) continue;
+
+            SelectNodeInternal(node);
+            boardCamera?.FocusOn(node.Rect, immediate: false);
+
+            float tPop = 0f;
+            Vector3 from = node.Rect.localScale;
+            Vector3 to   = Vector3.one;
+            while (tPop < 1f)
+            {
+                tPop += Time.unscaledDeltaTime / Mathf.Max(0.01f, nodePopDuration);
+                float e = Mathf.SmoothStep(0f, 1f, tPop);
+                node.Rect.localScale = Vector3.LerpUnclamped(from, to, e);
+                yield return null;
+            }
+            node.Rect.localScale = Vector3.one;
+
+            if (panelDelayAfterPop > 0f)
+            {
+                float end = Time.unscaledTime + panelDelayAfterPop;
+                while (Time.unscaledTime < end) yield return null;
+            }
+
+            if (infoPanel) infoPanel.ShowFor(node.Data, immediate: false);
+
+            // Guarded advance logic
+            bool readyToAdvance = false;
+            float guardTimer = 0f;
+            bool releaseSeen = false;
+
+            while (!readyToAdvance)
+            {
+                var action = submitAction ? submitAction.action : null;
+                bool pressedThisFrame = action != null && action.WasPerformedThisFrame();
+                bool isPressed        = action != null && action.IsPressed();
+
+                if (infoPanel && infoPanel.IsTyping)
+                {
+                    if (pressedThisFrame)
+                    {
+                        infoPanel.CompleteTyping();
+                        guardTimer = 0f;
+                        releaseSeen = false;
+                        Debug.Log("[CognitionBoard] Cutscene: typewriter fast-forwarded.", this);
+                    }
+                }
+                else
+                {
+                    if (!releaseSeen)
+                    {
+                        if (!isPressed)
+                        {
+                            releaseSeen = true;
+                            guardTimer = 0f;
+                            Debug.Log($"[CognitionBoard] Cutscene: release detected; starting {minAdvanceDelayAfterType:0.00}s guard.", this);
+                        }
+                    }
+                    else
+                    {
+                        guardTimer += Time.unscaledDeltaTime;
+                        if (guardTimer >= Mathf.Max(0f, minAdvanceDelayAfterType) && pressedThisFrame)
+                        {
+                            readyToAdvance = true;
+                            Debug.Log("[CognitionBoard] Cutscene: advance accepted after guard.", this);
+                        }
+                    }
+                }
+
+                yield return null;
+            }
+
+            // Reveal any pending lines that touch THIS node.
+            var toRemove = new List<(string,string)>();
+            foreach (var pair in pendingLineReveals)
+            {
+                bool touchesThis = pair.Item1 == node.ClueGuid || pair.Item2 == node.ClueGuid;
+                if (!touchesThis) continue;
+
+                EnsureLineWithStyle(pair.Item1, pair.Item2);
+
+                if (!lines.TryGetValue(pair, out var line) || line == null) continue;
+
+                bool connectsToNextNew =
+                    (i + 1 < ordered.Count) &&
+                    (ordered[i + 1].ClueGuid == pair.Item1 || ordered[i + 1].ClueGuid == pair.Item2);
+
+                line.SetReveal(0f);
+
+                float t = 0f;
+                while (t < 1f)
+                {
+                    t += Time.unscaledDeltaTime / Mathf.Max(0.01f, revealDurationPerLine);
+                    float p = Mathf.Clamp01(t);
+                    line.SetReveal(p);
+
+                    if (connectsToNextNew)
+                    {
+                        var tip = line.GetRevealTipWorld();
+                        boardCamera?.FocusOnWorldPoint(tip, immediate: false);
+                    }
+
+                    yield return null;
+                }
+                line.SetReveal(1f);
+
+                toRemove.Add(pair);
+                Debug.Log($"[CognitionBoard] Cutscene: revealed connection '{pair.Item1}' <-> '{pair.Item2}'. NextNew={connectsToNextNew}", this);
+            }
+            foreach (var pr in toRemove)
+            {
+                pendingLineReveals.Remove(pr);
+                pendingLineSet.Remove(pr);
+            }
+
+            infoPanel?.Hide(false);
+        }
+
+        // Done with node reveals
+        pendingNodePops.Clear();
+
+        // Smooth zoom OUT to default
+        yield return StartCoroutine(ZoomToOverSeconds(Mathf.Max(0.05f, defaultZoom), cutsceneOutZoomSeconds));
+
+        // Final selection & info restore
+        if (ordered.Count > 0) SelectNodeInternal(ordered[^1]);
+        else SelectClosestToViewCenterAndFocus();
+
+        if (selectedNode && (!showInfoOnlyWhenHardFocus || !inFreelook))
+            infoPanel?.ShowFor(selectedNode.Data, immediate: true);
+
+        cutsceneRunning = false;
+        cutsceneScheduled = false;
+        cutsceneActive = false;
+
+        Debug.Log("[CognitionBoard] Cutscene END — inputs ungated; normal selection/info behavior resumed.", this);
+    }
+
+    // Build ordered list of *new* nodes (filters out anything already visible).
+    private List<ClueNode> BuildOrderedNewNodes()
+    {
+        var list = new List<ClueNode>();
+        var order = SaveSystem.Instance ? SaveSystem.Instance.GetDiscoveryOrder() : null;
+
+        if (order != null && order.Count > 0)
+        {
+            foreach (var guid in order)
+            {
+                if (!pendingNodePops.Contains(guid)) continue;
+                if (!nodes.TryGetValue(guid, out var n) || n == null) continue;
+                if (IsVisiblyRevealed(n)) continue; // defensive filter
+                list.Add(n);
+            }
+        }
+
+        if (list.Count == 0)
+        {
+            foreach (var guid in pendingNodePops)
+            {
+                if (!nodes.TryGetValue(guid, out var n) || n == null) continue;
+                if (IsVisiblyRevealed(n)) continue;
+                list.Add(n);
+            }
+        }
+
+        return list;
+    }
+
+    // Smooth absolute zoom to target using BoardCamera
+    private System.Collections.IEnumerator ZoomToOverSeconds(float targetAbsoluteZoom, float seconds)
+    {
+        if (!boardCamera) yield break;
+
+        float start = boardCamera.CurrentZoom;
+        targetAbsoluteZoom = Mathf.Max(0.05f, targetAbsoluteZoom);
+        seconds = Mathf.Max(0.001f, seconds);
+
+        float t = 0f;
+        while (t < 1f)
+        {
+            t += Time.unscaledDeltaTime / seconds;
+            float z = Mathf.Lerp(start, targetAbsoluteZoom, Mathf.SmoothStep(0f, 1f, t));
+
+            float factor = Mathf.Clamp(z / Mathf.Max(0.0001f, boardCamera.CurrentZoom), 0.01f, 100f);
+            boardCamera.ZoomAroundCenter(factor);
+
+            yield return null;
+        }
     }
 }
