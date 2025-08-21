@@ -9,6 +9,12 @@ public class CognitionBoard : MonoBehaviour
     [SerializeField] private ClueNode nodePrefab;
     [SerializeField] private ConnectionLineUI linePrefab;
 
+    [Header("Clue Info Panel")]
+    [Tooltip("Optional. If assigned, shows clue name/description when in hard focus.")]
+    [SerializeField] private ClueInfoPanel infoPanel;
+    [Tooltip("If true, the info panel is only visible when not in Freelook.")]
+    [SerializeField] private bool showInfoOnlyWhenHardFocus = true;
+
     [Header("Line Style")]
     [SerializeField] private Color suggestedColor = new(0.90f, 0.25f, 0.25f, 1f);
     [SerializeField] private float suggestedWidth = 4f;
@@ -85,9 +91,9 @@ public class CognitionBoard : MonoBehaviour
     public RectTransform ContentRect => contentRect ? contentRect : (RectTransform)transform;
     public float CurrentZoom => ContentRect ? ContentRect.localScale.x : 1f;
 
-    private readonly List<(string, string)> pendingLineReveals = new(); // ORDERED
-    private readonly HashSet<(string, string)> pendingLineSet = new();  // uniqueness
-    private readonly List<string> pendingNodePops = new();              // ORDERED
+    private readonly List<(string, string)> pendingLineReveals = new();
+    private readonly HashSet<(string, string)> pendingLineSet = new();
+    private readonly List<string> pendingNodePops = new();
 
     private readonly Dictionary<string, ClueNode> nodes = new();
     private readonly Dictionary<(string, string), ConnectionLineUI> lines = new();
@@ -134,6 +140,10 @@ public class CognitionBoard : MonoBehaviour
             boardCamera.FocusOn(selectedNode.Rect, immediate: false);
 
         if (selectedNode) selectedNode.SetSelected(true);
+
+        // Show info panel immediately if we have a selection and we’re not in freelook
+        if (infoPanel && selectedNode && (!showInfoOnlyWhenHardFocus || !inFreelook))
+            infoPanel.ShowFor(selectedNode.Data, immediate: true);
     }
 
     private void OnDisable()
@@ -149,6 +159,8 @@ public class CognitionBoard : MonoBehaviour
 
         try { zoomAction?.action?.Disable(); } catch { }
         try { freeLookAction?.action?.Disable(); } catch { }
+
+        infoPanel?.Hide(true);
     }
 
     private void EnsureLayers()
@@ -260,6 +272,9 @@ public class CognitionBoard : MonoBehaviour
         AutoSelectClosestToCenter();
 
         if (selectedNode) selectedNode.SetSelected(true);
+
+        if (infoPanel && selectedNode && (!showInfoOnlyWhenHardFocus || !inFreelook))
+            infoPanel.ShowFor(selectedNode.Data, immediate: true);
     }
 
     public void NotifyBoardOpened()
@@ -289,6 +304,13 @@ public class CognitionBoard : MonoBehaviour
         {
             if (invertFreelookY) look.y = -look.y;
 
+            // First frame entering freelook? Hide info panel if it's hard-focus only.
+            if (!inFreelook)
+            {
+                inFreelook = true;
+                if (infoPanel && showInfoOnlyWhenHardFocus) infoPanel.Hide(false);
+            }
+
             freelookHeldTime += dt;
 
             float speedNow = ExpoRamp(panSpeedInitial, panSpeedMax, freelookHeldTime, panSpeedRampDuration);
@@ -300,12 +322,10 @@ public class CognitionBoard : MonoBehaviour
                 ContentRect.anchoredPosition += contentDelta;
                 SaveSystem.Instance?.SetBoardPan(ContentRect.anchoredPosition);
             }
-
-            inFreelook = true;
         }
         else
         {
-            freelookHeldTime = 0f; // reset ramp
+            freelookHeldTime = 0f; // reset ramp (we remain in freelook until left stick)
         }
 
         // --- Directional selection (left stick / keys) ----------------------
@@ -315,10 +335,13 @@ public class CognitionBoard : MonoBehaviour
 
         if (mag > navDeadZone)
         {
+            // Leaving freelook via left stick: pick node near center, refocus, show info.
             if (inFreelook)
             {
                 inFreelook = false;
                 SelectClosestToViewCenterAndFocus();
+                if (infoPanel && selectedNode && showInfoOnlyWhenHardFocus)
+                    infoPanel.ShowFor(selectedNode.Data, immediate: false);
             }
 
             Vector2 norm = dir / mag;
@@ -374,10 +397,8 @@ public class CognitionBoard : MonoBehaviour
     {
         if (!ContentRect || boardCamera == null) return;
 
-        // Direction is +1 or -1. Build a multiplicative factor using our ramped rate.
         float rateNow = ExpoRamp(zoomRateInitial, zoomRateMax, zoomHeldTime, zoomRateRampDuration);
         float magnitude = Mathf.Max(0f, zoomStep * rateNow * Time.unscaledDeltaTime);
-
         if (magnitude <= Mathf.Epsilon) return;
 
         float factor = (direction > 0f) ? (1f + magnitude) : (1f / (1f + magnitude));
@@ -389,7 +410,7 @@ public class CognitionBoard : MonoBehaviour
                     selectedNode.Rect.TransformPoint(selectedNode.Rect.rect.center));
 
             boardCamera.ZoomAround(factor, pivotInViewport);
-            boardCamera.FocusOn(selectedNode.Rect, immediate: false); // keep perfectly centered
+            boardCamera.FocusOn(selectedNode.Rect, immediate: false);
         }
         else
         {
@@ -446,6 +467,10 @@ public class CognitionBoard : MonoBehaviour
         }
 
         OnSelectedNodeChanged(selectedNode);
+
+        // Update info panel if we’re not in freelook (or if hard-focus-only is off)
+        if (infoPanel && selectedNode && (!showInfoOnlyWhenHardFocus || !inFreelook))
+            infoPanel.ShowFor(selectedNode.Data, immediate: false);
     }
 
     void OnSelectedNodeChanged(ClueNode node)
@@ -461,6 +486,7 @@ public class CognitionBoard : MonoBehaviour
             selectedNode.Rect.localScale = Vector3.one;
         }
         selectedNode = null; selectedGuid = null;
+        infoPanel?.Hide(false);
     }
 
     private bool MoveSelectionInDirection(Vector2 dir)
@@ -505,6 +531,9 @@ public class CognitionBoard : MonoBehaviour
             ContentRect.anchoredPosition = -node.Rect.anchoredPosition;
             SaveSystem.Instance?.SetBoardPan(ContentRect.anchoredPosition);
         }
+
+        if (infoPanel && node && (!showInfoOnlyWhenHardFocus || !inFreelook))
+            infoPanel.ShowFor(node.Data, immediate: true);
     }
 
     // ---------- Auto-link logic ----------
@@ -684,6 +713,7 @@ public class CognitionBoard : MonoBehaviour
 
         SaveSystem.Instance?.SetBoardZoom(1f);
         SaveSystem.Instance?.SetBoardPan(Vector2.zero);
+        infoPanel?.Hide(true);
     }
 
     // ---------- Placement helpers ----------

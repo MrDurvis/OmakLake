@@ -14,7 +14,8 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   guid: e086dc5a-304f-4825-aeaa-e467e7e5f13b
   clueName: FlorianMurderScene
-  description: Florian's Murder Scene Clue
+  description: I found Florian lying face down in a puddle of black oil, on the floor
+    of Omak Motors.
   icon: {fileID: 21300000, guid: 24ae1fb01aff8c849a5f4177ac7ffcf0, type: 3}
   category: 1
   relatedClues:

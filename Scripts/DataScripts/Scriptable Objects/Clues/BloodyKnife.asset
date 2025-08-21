@@ -14,7 +14,8 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   guid: 10288647-3277-4054-9b9d-a107a3871f37
   clueName: BloodyKnife
-  description: Bloody Knife Clue
+  description: "A Cuchillo Stanley knife, found in the bushes near Omak Motors. \n\nCould
+    this be the knife that killed Florian?"
   icon: {fileID: 21300000, guid: 9d4d95e5eec0af940906dff8eb53f033, type: 3}
   category: 1
   relatedClues:

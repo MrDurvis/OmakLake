@@ -13,6 +13,12 @@ public class ClueData : ScriptableObject
     public Sprite icon;
     public ClueCategory category;
 
+    [Header("UI Overrides (optional)")]
+    [Tooltip("If empty, UI will use 'clueName'.")]
+    public string displayTitle;
+    [Tooltip("If empty, UI will use 'description'.")]
+    [TextArea(2, 8)] public string displayBody;
+
     [Header("Related Clues (drag & drop)")]
     [Tooltip("Drag other ClueData assets here. We'll keep the GUID list in sync automatically.")]
     public List<ClueData> relatedClues = new();
@@ -53,7 +59,6 @@ public class ClueData : ScriptableObject
             }
         }
 
-        // Write back only if changed (avoids dirtying assets unnecessarily)
         bool changed = false;
         if (set.Count != relatedClueGuids.Count) changed = true;
         else
